@@ -258,3 +258,12 @@ describe('newId', () => {
     expect(newId('c', NOW)).toMatch(/^c/)
   })
 })
+
+describe('unchanged writes', () => {
+  it('writes nothing when the change leaves the document as it was', async () => {
+    const fake = new FakeOpenGym(profile(), 9)
+    const r = await store(fake).update((d) => ((d.lang = 'de'), apply('same')))
+    expect(r.ok && r.data).toMatchObject({ unchanged: true, rev: 9 })
+    expect(fake.stub.writes).toHaveLength(0)
+  })
+})

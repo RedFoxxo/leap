@@ -26,8 +26,8 @@ export function profile(): Record<string, unknown> {
         name: 'Push Day',
         emoji: 'barbell',
         ex: [
-          { id: '0025', sets: 4, reps: 8, weight: 80, restSec: 150, warmupSets: 2, prog: 'double', inc: 2.5 },
-          { id: '0294', sets: 3, repsMin: 10, repsMax: 12, weight: 14, sg: 'sg1', side: true },
+          { id: '0025', sets: 4, reps: 8, weight: 80, restSec: 150, warmupSets: 2, prog: 'double', inc: 2.5, sg: 'sg1' },
+          { id: '0294', sets: 3, reps: 12, repsMin: 10, repsMax: 12, weight: 14, sg: 'sg1', side: true },
         ],
         _ts: T0 - 10 * min,
       },

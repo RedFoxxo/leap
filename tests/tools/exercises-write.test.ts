@@ -116,7 +116,8 @@ describe('delete_custom_exercise', () => {
     const routine = doc().routines.find((x: { id: string }) => x.id === PUSH)
     expect(routine.ex.map((e: { id: string }) => e.id)).toEqual(['0025', '0294', '0043'])
     expect(routine.ex[2]).not.toHaveProperty('sg')
-    expect(routine.ex[1].sg).toBeUndefined()
+    expect(routine.ex[1].sg).toBe('sg1')
+    expect(routine._ts).toBe(NOW)
     expect(doc().favEx).toEqual(['0025'])
     expect(doc().exWeights).toEqual({ '0025': { w: 82.5, d: '2026-10-05' } })
     const entry = doc().workouts[1].entries[2]

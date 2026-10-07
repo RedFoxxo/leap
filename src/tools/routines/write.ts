@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { customExercises } from '../../catalog/exercises.js'
+import { ExerciseIndex } from '../../catalog/exercises.js'
+import { defaultItem, ITEM_FIELDS, POLICIES_FOR, ROUTINE_POLICIES, type ItemMode } from '../../domain/routine-items.js'
 import { WEEKDAYS } from '../../domain/dates.js'
 import { routineName, weekdayRoutineIds } from '../../domain/plan.js'
 import { newId } from '../../state/ids.js'
@@ -11,84 +12,51 @@ import { entryId, exerciseId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
 import { change, LAST_CHANGE_NOTE, RESURRECTION_NOTE } from '../write.js'
 
-const POLICIES = ['off', 'linear', 'greyskull', 'double', 'time'] as const
+const nullable = <T extends z.ZodTypeAny>(t: T) => t.nullable().optional()
+const intensifier = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('dropset'), count: z.number().int().min(1).max(10), pct: z.number().int().min(5).max(90) }),
+  z.object({ type: z.literal('restpause'), totalReps: z.number().int().min(1).max(200), restSec: z.number().int().min(5).max(120) }),
+])
 
+/**
+ * One routine exercise in the format read_routine returns. For an exercise the routine already has,
+ * a field left out keeps its value and null removes it; a new exercise starts from the app's defaults.
+ */
 const item = z
   .object({
     exerciseId,
-    sets: z.number().int().min(1).max(20),
-    reps: z.number().int().min(1).max(100).optional(),
-    repsMin: z.number().int().min(1).max(100).optional().describe('Bottom of a rep range (double progression)'),
-    repsMax: z.number().int().min(1).max(100).optional(),
-    weight: z.number().min(0).max(2000).optional().describe('In the profile unit; added weight for body-weight exercises'),
-    mode: z.enum(['reps', 'time', 'cardio']).optional().describe('Default reps; time uses sec, cardio uses min and speed'),
-    sec: z.number().int().min(1).max(7200).optional(),
-    min: z.number().min(0.5).max(600).optional(),
-    speed: z.number().min(0).max(60).optional().describe('km/h'),
-    restSec: z.number().int().min(0).max(3600).optional(),
-    warmupRestSec: z.number().int().min(0).max(3600).optional(),
-    warmupSets: z.number().int().min(0).max(5).optional(),
-    superset: z.string().min(1).max(20).optional().describe('Label shared by adjacent exercises done as a superset, e.g. "A"'),
-    note: z.string().max(500).optional(),
-    progression: z.enum(POLICIES).optional().describe('Overrides the routine progression for this exercise'),
-    increment: z.number().positive().max(100).optional(),
-    deloadFactor: z.number().min(0.5).max(1).optional(),
-    bodyweight: z.boolean().optional(),
-    perSide: z.boolean().optional().describe('Unilateral; reps are the total of both sides'),
-    assisted: z.boolean().optional(),
-    intensifier: z
-      .discriminatedUnion('type', [
-        z.object({ type: z.literal('dropset'), count: z.number().int().min(1).max(10), pct: z.number().int().min(5).max(90) }),
-        z.object({ type: z.literal('restpause'), totalReps: z.number().int().min(1).max(200), restSec: z.number().int().min(5).max(120) }),
-      ])
-      .optional(),
+    sets: z.number().int().min(1).max(20).optional().describe('Default 3 (cardio 1)'),
+    reps: nullable(z.number().int().min(1).max(100)).describe('Reps per set (default 10); with double progression the top of the range; per side: the total of both sides, even'),
+    repsMin: nullable(z.number().int().min(1).max(100)).describe('Double progression: the bottom of the range, below reps (default reps - 2)'),
+    repsMax: nullable(z.number().int().min(1).max(200)).describe('Body-weight exercises without added weight: reps at which a set is added; not below reps'),
+    weight: nullable(z.number().min(0).max(2000)).describe('In the profile unit; added weight for body-weight exercises'),
+    mode: nullable(z.enum(['reps', 'time', 'cardio'])).describe('reps or time (sec); cardio (min, speed) is for cardio exercises only'),
+    sec: nullable(z.number().int().min(1).max(7200)),
+    min: nullable(z.number().min(0.5).max(600)),
+    speed: nullable(z.number().min(0).max(60)).describe('km/h'),
+    restSec: nullable(z.number().int().min(0).max(3600)),
+    warmupRestSec: nullable(z.number().int().min(0).max(3600)),
+    warmupSets: nullable(z.number().int().min(0).max(5)),
+    superset: nullable(z.string().min(1).max(64)).describe('Label (or the id read_routine shows) shared by adjacent exercises done as a superset'),
+    note: nullable(z.string().max(500)),
+    progression: nullable(z.enum(['off', 'linear', 'greyskull', 'double', 'time'])).describe('Overrides the routine progression: reps exercises off/linear/greyskull/double, timed off/time, cardio off'),
+    increment: nullable(z.number().positive().max(100)),
+    deloadFactor: nullable(z.number().min(0.5).max(0.95)),
+    bodyweight: nullable(z.boolean()),
+    perSide: nullable(z.boolean()).describe('Unilateral; reps are the total of both sides'),
+    assisted: nullable(z.boolean()),
+    intensifier: nullable(intensifier),
+    position: z.number().optional().describe('Ignored (from read_routine)'),
+    name: z.string().optional().describe('Ignored (from read_routine)'),
+    other: z.record(z.string(), z.unknown()).optional().describe('Ignored (from read_routine); those fields are kept as they are'),
   })
   .strict()
 
 type Item = z.output<typeof item>
 
-/** Item fields leap writes; anything else on an existing item is openGym's and is carried over. */
-const MANAGED = new Set([
-  'id', 'sets', 'reps', 'repsMin', 'repsMax', 'weight', 'mode', 'sec', 'min', 'speed', 'restSec', 'warmupRestSec',
-  'warmupSets', 'sg', 'note', 'prog', 'inc', 'deloadFactor', 'bodyweight', 'side', 'assisted', 'intensifier',
-])
-
-function storedItem(input: Item, sg: string | undefined, carried: Entry): Entry {
-  const out: Entry = { ...carried, id: input.exerciseId, sets: input.sets }
-  const set = (key: string, value: unknown) => {
-    if (value !== undefined && value !== '') out[key] = value
-  }
-  set('reps', input.reps)
-  set('repsMin', input.repsMin)
-  set('repsMax', input.repsMax)
-  set('weight', input.weight)
-  set('mode', input.mode)
-  set('sec', input.sec)
-  set('min', input.min)
-  set('speed', input.speed)
-  set('restSec', input.restSec)
-  set('warmupRestSec', input.warmupRestSec)
-  set('warmupSets', input.warmupSets)
-  set('sg', sg)
-  set('note', input.note?.trim())
-  set('prog', input.progression)
-  set('inc', input.increment)
-  set('deloadFactor', input.deloadFactor)
-  set('bodyweight', input.bodyweight)
-  set('side', input.perSide)
-  set('assisted', input.assisted)
-  set('intensifier', input.intensifier)
-  return out
-}
-
-function itemProblems(items: Item[]): string[] {
+function supersetProblems(items: Item[]): string[] {
   const problems: string[] = []
-  items.forEach((x, i) => {
-    if (x.repsMin !== undefined && x.repsMax !== undefined && x.repsMin > x.repsMax) problems.push(`exercise ${i + 1}: repsMin is above repsMax`)
-    if (x.mode === 'cardio' && (x.reps !== undefined || x.sec !== undefined)) problems.push(`exercise ${i + 1}: a cardio exercise takes min and speed, not reps or sec`)
-    if (x.mode === 'time' && x.reps !== undefined) problems.push(`exercise ${i + 1}: a timed exercise takes sec, not reps`)
-  })
-  const labels = items.map((x) => x.superset)
+  const labels = items.map((x) => x.superset ?? undefined)
   const seen = new Set<string>()
   labels.forEach((label, i) => {
     if (!label) return
@@ -99,50 +67,114 @@ function itemProblems(items: Item[]): string[] {
   return problems
 }
 
-/** The routine's new exercise list: input order, superset labels turned into ids, openGym's extra fields kept per exercise. */
-function buildItems(items: Item[], existing: Entry[], now: number): Entry[] {
-  const pool = new Map<string, Entry[]>()
-  for (const e of existing) {
-    const id = String(e.id)
-    pool.set(id, [...(pool.get(id) ?? []), e])
-  }
-  const groups = new Map<string, string>()
-  return items.map((x) => {
-    const old = pool.get(x.exerciseId)?.shift()
-    const carried = old ? Object.fromEntries(Object.entries(old).filter(([k]) => !MANAGED.has(k))) : {}
-    let sg: string | undefined
-    if (x.superset) {
-      if (!groups.has(x.superset)) {
-        const reuse = typeof old?.sg === 'string' && ![...groups.values()].includes(old.sg) ? old.sg : undefined
-        groups.set(x.superset, reuse ?? newId('sg', now))
-      }
-      sg = groups.get(x.superset)
-    }
-    return storedItem(x, sg, carried)
+/** Superset ids that no longer pair adjacent exercises are dropped, as the app does. */
+function cleanupSupersets(items: unknown[]): void {
+  items.forEach((e, i) => {
+    if (!isRecord(e) || !e.sg) return
+    const prev = items[i - 1]
+    const next = items[i + 1]
+    if (!((isRecord(prev) && prev.sg === e.sg) || (isRecord(next) && next.sg === e.sg))) delete e.sg
   })
 }
 
-async function exerciseCheck(ctx: ToolContext): Promise<(state: State, ids: string[]) => string | undefined> {
+interface Catalogue {
+  unknown: (ids: string[]) => string | undefined
+  cardio: (id: string) => boolean
+  bodyweight: (id: string) => boolean
+}
+
+async function catalogue(ctx: ToolContext): Promise<(state: State) => Catalogue> {
   const builtin = await ctx.builtinExercises()
-  return (state, ids) => {
-    const custom = new Set(customExercises(state).map((c) => c.id))
-    const unknown = ids.filter((id) => !builtin.exercises.has(id) && !custom.has(id) && !(builtin.error && !id.startsWith('c')))
-    return unknown.length ? `unknown exercise ids: ${[...new Set(unknown)].join(', ')}; find ids with read_exercises` : undefined
+  return (state) => {
+    const index = new ExerciseIndex(builtin, state)
+    return {
+      unknown: (ids) => {
+        const missing = ids.filter((id) => !index.get(id) && !(builtin.error && /^\d{4}$/.test(id)))
+        return missing.length ? `unknown exercise ids: ${[...new Set(missing)].join(', ')}; find ids with read_exercises` : undefined
+      },
+      cardio: (id) => index.get(id)?.bodyPart === 'cardio',
+      bodyweight: (id) => index.get(id)?.equipment === 'body weight',
+    }
   }
 }
 
+/**
+ * The routine's new exercise list: input order; an exercise the routine had keeps every field not
+ * given (null removes one), a new one starts from the app's defaults; checked as the app's editor
+ * checks it. Returns the items or why not.
+ */
+function buildItems(inputs: Item[], existing: Entry[], routineProg: unknown, cat: Catalogue, now: number): Entry[] | string {
+  const pool = new Map<string, Entry[]>()
+  for (const e of existing) pool.set(String(e.id), [...(pool.get(String(e.id)) ?? []), e])
+  const oldGroups = new Set(existing.map((e) => e.sg).filter((g): g is string => typeof g === 'string'))
+  const groups = new Map<string, string>()
+  const out: Entry[] = []
+  for (const [i, x] of inputs.entries()) {
+    const where = `exercise ${i + 1} (${x.exerciseId})`
+    const cardio = cat.cardio(x.exerciseId)
+    const old = pool.get(x.exerciseId)?.shift()
+    const mode0: ItemMode = (x.mode ?? (cardio ? 'cardio' : 'reps')) as ItemMode
+    const e: Entry = old ? structuredClone(old) : defaultItem(x.exerciseId, mode0, cat.bodyweight(x.exerciseId))
+    for (const [tool, key] of ITEM_FIELDS) {
+      const value = (x as Record<string, unknown>)[tool]
+      if (value === undefined) continue
+      const v = typeof value === 'string' ? value.trim() : value
+      if (v === null || v === '') delete e[key]
+      else e[key] = v
+    }
+    if (x.superset === null) delete e.sg
+    else if (x.superset) {
+      if (!groups.has(x.superset)) {
+        const used = new Set(groups.values())
+        let id = oldGroups.has(x.superset) && !used.has(x.superset) ? x.superset : newId('sg', now)
+        while (used.has(id)) id = newId('sg', now + used.size)
+        groups.set(x.superset, id)
+      }
+      e.sg = groups.get(x.superset)
+    }
+    // An exercise this call neither adds nor changes is kept as it is, odd old data included: it must not block other edits.
+    const touched = !old || x.superset !== undefined || ITEM_FIELDS.some(([tool]) => (x as Record<string, unknown>)[tool] !== undefined)
+    if (!touched) {
+      out.push(e)
+      continue
+    }
+    const mode: ItemMode = e.mode === 'time' ? 'time' : e.mode === 'cardio' || (e.mode === undefined && cardio) ? 'cardio' : 'reps'
+    if (cardio && mode !== 'cardio') return `${where} is a cardio exercise; it is planned in minutes and speed (mode cardio)`
+    if (!cardio && mode === 'cardio') return `${where} is not a cardio exercise; use mode reps or time`
+    if (mode === 'reps') {
+      if (!(typeof e.reps === 'number' && e.reps >= 1)) return `${where} needs reps`
+      if (e.side === true && e.reps % 2 !== 0) return `${where} is per side: reps are the total of both sides and must be even (e.g. ${e.reps + 1})`
+      if (typeof e.repsMin === 'number' && e.repsMin >= e.reps) return `${where}: repsMin (${e.repsMin}) must be below reps (${e.reps}), the top of the range`
+      if (typeof e.repsMax === 'number' && e.repsMax < e.reps) return `${where}: repsMax (${e.repsMax}) is where a set is added and must not be below reps (${e.reps})`
+    }
+    if (mode === 'time' && !(typeof e.sec === 'number')) return `${where} is timed and needs sec`
+    if (mode === 'cardio' && !(typeof e.min === 'number')) return `${where} is cardio and needs min`
+    const policy = String(e.prog ?? routineProg ?? (mode === 'reps' ? 'linear' : 'off'))
+    if (e.prog !== undefined && !POLICIES_FOR[mode].includes(String(e.prog))) {
+      return `${where}: progression "${String(e.prog)}" does not fit a ${mode} exercise (${POLICIES_FOR[mode].join(', ')})`
+    }
+    // The app gives a double-progression range its bottom when the plan is set up; only then, not on every edit.
+    const rangeAsked = !old || (x.reps !== undefined && x.reps !== old.reps) || (x.progression !== undefined && x.progression !== old.prog) || x.repsMin !== undefined
+    if (mode === 'reps' && policy === 'double' && typeof e.repsMin !== 'number' && rangeAsked) e.repsMin = Math.max(1, Number(e.reps) - 2)
+    out.push(e)
+  }
+  cleanupSupersets(out)
+  return out
+}
+
 const routineLine = (r: Entry) => ({ id: r.id, name: r.name, exercises: listOf(r, 'ex').length })
+const withoutStamp = (r: Entry) => JSON.stringify({ ...r, _ts: undefined })
 
 export const writeRoutine = defineTool({
   name: 'write_routine',
   description:
-    'Create a routine (no id) or change one (id). `exercises`, when given, replaces the whole list in that order; fields openGym keeps that this tool does not know are carried over from the same exercise\'s existing entry. Weights in the profile unit. Exercises sharing a `superset` label must be next to each other. `progression` is the routine default: off, linear (default for reps), greyskull, double, time.',
+    'Create a routine (no id) or change one (id). `exercises`, when given, is the new list in that order, in the format read_routine returns: for an exercise the routine already has, every field left out keeps its value and null removes it; a new exercise starts from the app\'s defaults (3 × 10, timed 3 × 45 s, cardio 1 × 20 min at 8 km/h). Fields openGym keeps that leap does not know are kept. Weights in the profile unit. `progression` is the routine default: off, linear (default), greyskull, double.',
   input: {
     id: entryId.optional(),
     name: z.string().trim().min(1).max(60).optional(),
-    emoji: z.string().max(30).optional(),
-    progression: z.enum(POLICIES).optional(),
-    excludeFromProgression: z.boolean().optional(),
+    emoji: z.string().max(40).optional().describe("The app's icon key, e.g. figureStrength; unknown keys show the default icon; empty removes it"),
+    progression: z.enum(ROUTINE_POLICIES).optional(),
+    excludeFromProgression: z.boolean().optional().describe('Sessions of this routine (e.g. a deload) do not count for progression'),
     exercises: z.array(item).max(40).optional(),
   },
   async handler(args, ctx) {
@@ -150,14 +182,15 @@ export const writeRoutine = defineTool({
     if (args.id && [args.name, args.emoji, args.progression, args.excludeFromProgression, args.exercises].every((v) => v === undefined)) {
       return invalid('nothing to change')
     }
-    const problems = itemProblems(args.exercises ?? [])
+    const problems = supersetProblems(args.exercises ?? [])
     if (problems.length) return invalid(problems.join('; '))
-    const check = await exerciseCheck(ctx)
+    const makeCatalogue = await catalogue(ctx)
     return change(
       ctx,
       'save the routine',
       (draft, { now }) => {
-        const unknown = check(draft, (args.exercises ?? []).map((x) => x.exerciseId))
+        const cat = makeCatalogue(draft)
+        const unknown = cat.unknown((args.exercises ?? []).map((x) => x.exerciseId))
         if (unknown) return refuse(unknown)
         const routines = writableList(draft, 'routines')
         let routine: Entry
@@ -169,6 +202,7 @@ export const writeRoutine = defineTool({
           routine = { id: newId('', now), name: args.name, ex: [] }
           routines.push(routine)
         }
+        const before = withoutStamp(routine)
         if (args.name !== undefined) routine.name = args.name
         if (args.emoji !== undefined) {
           if (args.emoji) routine.emoji = args.emoji
@@ -179,8 +213,13 @@ export const writeRoutine = defineTool({
           if (args.excludeFromProgression) routine.excludeFromProgression = true
           else delete routine.excludeFromProgression
         }
-        if (args.exercises) routine.ex = buildItems(args.exercises, listOf(routine, 'ex'), now)
-        routine._ts = now
+        if (args.exercises) {
+          const items = buildItems(args.exercises, listOf(routine, 'ex'), routine.prog, cat, now)
+          if (typeof items === 'string') return refuse(items)
+          routine.ex = items
+        }
+        // Stamped only when it changed: a fresh stamp on an unchanged routine would outrank an unsynced edit elsewhere.
+        if (!args.id || withoutStamp(routine) !== before) routine._ts = now
         return apply({ routine: structuredClone(routine), created: !args.id })
       },
       (r) => ({ ...(r.created ? { created: true } : {}), routine: routineLine(r.routine) }),

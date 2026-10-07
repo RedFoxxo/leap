@@ -178,6 +178,26 @@ Exercise items: `{ id, sets }` plus optional `reps`, `repsMin`, `repsMax`,
 (superset group id), `note`, `intensifier`. (**source**: `views/sheets.jsx`
 routine editor, `lib/plan-share.js`)
 
+How the app's editor writes them (**source**: `sheets.jsx` ~1430-1450,
+`lib/history.js` `defaultConfig`, `lib/rep-range.js`, `lib/progression.js`):
+
+- A new exercise: reps `{ sets: 3, reps: 10, weight: 0, mode: "reps" }`, timed
+  `{ sets: 3, sec: 45, weight: 0, mode: "time" }`, cardio `{ sets: 1, min: 20,
+  speed: 8 }`; body-weight equipment adds `bodyweight: true`. Cardio is decided
+  by the exercise (body part `cardio`), not chosen.
+- `reps` is always there in reps mode; readers assume it (a missing one shows
+  "3 × undefined" and makes every session a miss, so progression deloads).
+- Double progression stores its range as `repsMin` (bottom, default reps − 2)
+  to `reps` (top). `repsMax` is something else: for body-weight work without
+  added weight, the reps at which a set is added; never below `reps`.
+- Per side, `reps` is the total of both sides and is kept even.
+- Policies: reps `off|linear|greyskull|double` (default linear), timed
+  `off|time`, cardio `off`; at routine level the first four. `deloadFactor`
+  at most 0.95 (default 0.9).
+- A routine with `excludeFromProgression` gives each session entry
+  `noProg: true` (deload weeks).
+- Routines are stamped (`_ts`) when changed; an unchanged save is not stamped.
+
 ## Custom exercises
 
 `{ id: "c…", n: name, bp: body part, eq: equipment, tg: target, primaries,

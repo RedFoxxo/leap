@@ -121,19 +121,21 @@ describe('read_routines and read_routine', () => {
     const r = await h.call('read_routine', { id: PULL })
     expect(r.json).toMatchObject({ id: PULL, name: 'Pull Day', plannedDates: ['2026-10-11'], unit: 'kg' })
     const push = await h.call('read_routine', { id: PUSH })
+    expect(push.json).toMatchObject({ name: 'Push Day', emoji: 'barbell' })
     expect(push.json.exercises[0]).toEqual({
       position: 1,
       name: 'barbell bench press',
-      id: '0025',
+      exerciseId: '0025',
       sets: 4,
       reps: 8,
       weight: 80,
       restSec: 150,
       warmupSets: 2,
-      prog: 'double',
-      inc: 2.5,
+      progression: 'double',
+      increment: 2.5,
+      superset: 'sg1',
     })
-    expect(push.json.exercises[1]).toMatchObject({ repsMin: 10, repsMax: 12, sg: 'sg1', side: true })
+    expect(push.json.exercises[1]).toMatchObject({ exerciseId: '0294', repsMin: 10, repsMax: 12, superset: 'sg1', perSide: true })
     expect(push.json).not.toHaveProperty('ex')
     expect((await h.call('read_routine', { id: 'nope' })).isError).toBe(true)
     vi.useRealTimers()

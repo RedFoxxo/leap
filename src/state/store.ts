@@ -41,6 +41,8 @@ export interface Written<R> {
   /** False when the read-back failed: `notPersisted` is then unknown. */
   verified: boolean
   warnings: string[]
+  /** The change left the document as it was, so nothing was written. */
+  unchanged?: boolean
 }
 
 /** openGym's body limit is 5 MiB. Stay clearly below it. */
@@ -103,6 +105,11 @@ export class StateStore {
       const draft: State = current ? structuredClone(current) : {}
       const decided = mutate(draft, { now })
       if (!decided.ok) return refused(decided.message)
+      // Nothing to change: no write, no new revision, and no fresh stamp that would outrank an
+      // unsynced edit on another device (the app skips unchanged saves for the same reason).
+      if (current && JSON.stringify(draft) === JSON.stringify(current)) {
+        return ok({ result: decided.result, rev, retries, notPersisted: [], verified: true, warnings, unchanged: true })
+      }
 
       draft._ts = now
       delete draft._rev

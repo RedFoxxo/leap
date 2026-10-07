@@ -14,57 +14,103 @@ async function setup(state: Record<string, unknown> = profile()) {
 }
 
 describe('write_routine', () => {
-  it('creates a routine with supersets, ranges, timed work and intensifiers', async () => {
-    const { h, doc } = await setup()
+  const withCardio = () => {
+    const state = profile()
+    ;(state.customEx as unknown[]).push({ id: 'crow', n: 'Rowing erg', bp: 'cardio', eq: 'leverage machine', primaries: ['cardiovascular system'], custom: true })
+    return state
+  }
+
+  it('creates a routine from the app’s defaults plus what is given', async () => {
+    const { h, doc } = await setup(withCardio())
     const r = await h.call('write_routine', {
       name: 'Upper A',
-      emoji: 'dumbbell',
+      emoji: 'figureStrength',
       progression: 'double',
       exercises: [
-        { exerciseId: '0025', sets: 3, repsMin: 6, repsMax: 10, weight: 80, restSec: 180, warmupSets: 2, superset: 'A' },
-        { exerciseId: '0294', sets: 3, reps: 12, weight: 14, perSide: true, superset: 'A', intensifier: { type: 'dropset', count: 1, pct: 20 } },
-        { exerciseId: 'cplank', sets: 3, mode: 'time', sec: 60, note: 'neutral spine' },
+        { exerciseId: '0025', sets: 3, reps: 10, repsMin: 6, weight: 80, restSec: 180, warmupSets: 2, superset: 'A' },
+        { exerciseId: '0294', reps: 12, weight: 14, perSide: true, superset: 'A', intensifier: { type: 'dropset', count: 1, pct: 20 } },
+        { exerciseId: 'cplank', mode: 'time', sec: 60, note: ' neutral spine ' },
+        { exerciseId: 'crow' },
       ],
     })
-    expect(r.json).toMatchObject({ saved: true, created: true, routine: { name: 'Upper A', exercises: 3 } })
+    expect(r.json).toMatchObject({ saved: true, created: true, routine: { name: 'Upper A', exercises: 4 } })
     const created = doc().routines.at(-1)
-    expect(created).toMatchObject({ name: 'Upper A', emoji: 'dumbbell', prog: 'double', _ts: NOW })
-    expect(created.id).toMatch(/^[0-9a-z]+$/)
-    const [bench, curl, plank] = created.ex
-    expect(bench).toEqual({ id: '0025', sets: 3, repsMin: 6, repsMax: 10, weight: 80, restSec: 180, warmupSets: 2, sg: expect.stringMatching(/^sg/) })
-    expect(curl).toEqual({ id: '0294', sets: 3, reps: 12, weight: 14, sg: bench.sg, side: true, intensifier: { type: 'dropset', count: 1, pct: 20 } })
-    expect(plank).toEqual({ id: 'cplank', sets: 3, mode: 'time', sec: 60, note: 'neutral spine' })
+    expect(created).toMatchObject({ name: 'Upper A', emoji: 'figureStrength', prog: 'double', _ts: NOW })
+    const [bench, curl, plank, row] = created.ex
+    expect(bench).toEqual({ id: '0025', sets: 3, reps: 10, repsMin: 6, weight: 80, mode: 'reps', restSec: 180, warmupSets: 2, sg: expect.stringMatching(/^sg/) })
+    expect(curl).toEqual({ id: '0294', sets: 3, reps: 12, repsMin: 10, weight: 14, mode: 'reps', side: true, intensifier: { type: 'dropset', count: 1, pct: 20 }, sg: bench.sg })
+    expect(plank).toEqual({ id: 'cplank', sets: 3, sec: 60, weight: 0, mode: 'time', note: 'neutral spine' })
+    expect(row).toEqual({ id: 'crow', sets: 1, min: 20, speed: 8 })
     await h.close()
   })
 
-  it('replaces the exercise list but keeps fields leap does not manage', async () => {
+  it('leaves an untouched exercise with odd old data alone instead of refusing the edit', async () => {
+    const state = profile()
+    delete (state.routines as any[])[0].ex[1].reps
+    const { h, routine } = await setup(state)
+    const r = await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', weight: 85 }, { exerciseId: '0294' }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(routine(PUSH).ex[1]).not.toHaveProperty('reps')
+    await h.close()
+  })
+
+  it('changes one exercise and keeps everything else, fields left out included', async () => {
     const state = profile()
     ;(state.routines as any[])[0].ex[0].appOnlyField = { x: 1 }
     const { h, routine } = await setup(state)
-    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', sets: 5, reps: 5, weight: 85 }] })
-    expect(routine(PUSH).ex).toEqual([{ appOnlyField: { x: 1 }, id: '0025', sets: 5, reps: 5, weight: 85 }])
-    expect(routine(PUSH)).toMatchObject({ name: 'Push Day', emoji: 'barbell', _ts: NOW })
+    const before = structuredClone(routine(PUSH))
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', weight: 85 }, { exerciseId: '0294' }] })
+    expect(routine(PUSH).ex).toEqual([{ ...before.ex[0], weight: 85 }, before.ex[1]])
+    expect(routine(PUSH)._ts).toBe(NOW)
     await h.close()
   })
 
-  it('renames without touching the exercises', async () => {
+  it('removes a field with null', async () => {
     const { h, routine } = await setup()
-    const before = structuredClone(routine(LEGS).ex)
-    await h.call('write_routine', { id: LEGS, name: 'Legs & Glutes', emoji: '' })
-    expect(routine(LEGS)).toEqual({ id: LEGS, name: 'Legs & Glutes', ex: before, _ts: NOW })
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', warmupSets: null, progression: null, increment: null }, { exerciseId: '0294', superset: null }] })
+    expect(routine(PUSH).ex[0]).toEqual({ id: '0025', sets: 4, reps: 8, weight: 80, restSec: 150 })
+    expect(routine(PUSH).ex[0]).not.toHaveProperty('repsMin')
+    expect(routine(PUSH).ex[1]).not.toHaveProperty('sg')
     await h.close()
   })
 
-  it('refuses bad plans before sending anything', async () => {
+  it('takes back what read_routine returns, and writes nothing when nothing changed', async () => {
+    const { h, fake } = await setup()
+    const read = await h.call('read_routine', { id: PUSH })
+    const r = await h.call('write_routine', { id: PUSH, name: read.json.name, exercises: read.json.exercises })
+    expect(r.json).toMatchObject({ saved: false, unchanged: true })
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('checks plans as the app’s editor does', async () => {
+    const { h, fake } = await setup(withCardio())
+    const refused: [Record<string, unknown>, RegExp][] = [
+      [{ exerciseId: '0025', reps: null }, /needs reps/],
+      [{ exerciseId: '0294', reps: 11, perSide: true }, /per side.*must be even/],
+      [{ exerciseId: '0025', reps: 8, repsMin: 8 }, /repsMin \(8\) must be below reps \(8\)/],
+      [{ exerciseId: '0025', repsMax: 6 }, /must not be below reps/],
+      [{ exerciseId: '0025', mode: 'cardio' }, /not a cardio exercise/],
+      [{ exerciseId: 'crow', mode: 'reps' }, /is a cardio exercise/],
+      [{ exerciseId: '0025', progression: 'time' }, /does not fit a reps exercise/],
+      [{ exerciseId: 'cplank', mode: 'time', sec: 30, progression: 'linear' }, /does not fit a time exercise/],
+    ]
+    for (const [x, message] of refused) expect((await h.call('write_routine', { name: 'X', exercises: [x] })).text, JSON.stringify(x)).toMatch(message)
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('refuses bad input before sending anything', async () => {
     const { h, fake } = await setup()
     const bad = [
       {},
       { id: PUSH },
-      { name: 'X', exercises: [{ exerciseId: '0025', sets: 3, repsMin: 10, repsMax: 6 }] },
-      { name: 'X', exercises: [{ exerciseId: '0025', sets: 3, superset: 'A' }, { exerciseId: '0043', sets: 3 }, { exerciseId: '0294', sets: 3, superset: 'A' }] },
-      { name: 'X', exercises: [{ exerciseId: '0025', sets: 3, superset: 'A' }] },
+      { name: 'X', progression: 'time' },
+      { name: 'X', exercises: [{ exerciseId: '0025', deloadFactor: 0.99 }] },
+      { name: 'X', exercises: [{ exerciseId: '0025', superset: 'A' }, { exerciseId: '0043' }, { exerciseId: '0294', superset: 'A' }] },
+      { name: 'X', exercises: [{ exerciseId: '0025', superset: 'A' }] },
       { name: 'X', exercises: [{ exerciseId: '0025', sets: 0 }] },
-      { name: 'X', exercises: [{ exerciseId: '0025', sets: 3, unknownField: 1 }] },
+      { name: 'X', exercises: [{ exerciseId: '0025', unknownField: 1 }] },
     ]
     for (const args of bad) expect((await h.call('write_routine', args)).isError, JSON.stringify(args)).toBe(true)
     expect(fake.stub.calls).toHaveLength(0)

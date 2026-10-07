@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { addDays, today, WEEKDAYS, weekdayOf } from '../../domain/dates.js'
 import { planFor, routineName, weekdayRoutineIds } from '../../domain/plan.js'
+import { itemForTools } from '../../domain/routine-items.js'
 import { routineIdsOf } from '../../domain/sets.js'
 import { listOf, mapOf, unitOf, type Entry, type State } from '../../state/types.js'
 import { loadProfile } from '../context.js'
@@ -53,7 +54,7 @@ export const readRoutines = defineTool({
 export const readRoutine = defineTool({
   name: 'read_routine',
   description:
-    'One routine as stored: every exercise with its name and the plan fields openGym keeps (sets, reps or repsMin–repsMax, weight in the profile unit, mode reps/time/cardio with sec or min/speed, restSec, warmupSets, sg = superset group, note, progression fields prog/inc/deloadFactor, bodyweight, side, assisted, intensifier). Also its weekdays, upcoming date overrides and when it was last done. What the app will actually prescribe next can differ: history and progression move the weight.',
+    'One routine: every exercise in the format write_routine takes (exerciseId, sets, reps — with double progression the top of the range, repsMin its bottom —, repsMax, weight in the profile unit, mode reps/time/cardio with sec or min/speed, restSec, warmupSets, superset, note, progression, increment, deloadFactor, bodyweight, perSide, assisted, intensifier; `other` lists fields openGym keeps that leap leaves alone), plus its name, weekdays, upcoming date overrides and when it was last done. What the app prescribes next can differ: history and progression move the weight.',
   input: { id: entryId },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
@@ -66,13 +67,14 @@ export const readRoutine = defineTool({
       .filter(([date, id]) => id === args.id && date >= from)
       .map(([date]) => date)
       .sort()
-    const { ex: _ex, ...rest } = routine
+    const { ex: _ex, prog, ...rest } = routine
     const days = weekdaysOf(state, args.id)
     const done = lastDone(state, args.id)
     return success({
       unit: unitOf(state),
       ...rest,
-      exercises: exercisesOf(routine).map((item, i) => ({ position: i + 1, name: exercises.name(String(item.id)), ...item })),
+      ...(prog !== undefined ? { progression: prog } : {}),
+      exercises: exercisesOf(routine).map((item, i) => itemForTools(item, i + 1, exercises.name(String(item.id)))),
       ...(days.length ? { weekdays: days } : {}),
       ...(dates.length ? { plannedDates: dates } : {}),
       ...(done ? { lastDone: done } : {}),

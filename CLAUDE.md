@@ -85,6 +85,7 @@ src/
                        rows, modes; volume, completed reps, best weight, entry routine
     plan.ts            weekday plan (list or legacy single id), date overrides, routine lookup
     dates.ts           local calendar days (`YYYY-MM-DD`), weekdays
+    routine-items.ts   routine exercise: stored format ↔ tool format, app defaults, policies
     workouts.ts        sorting, PR badge rebuild, remembered-weight raise/lower (the app's rules)
     stats.ts           1RM formulas and best set, PR rule (beatsWeight), exercise sessions,
                        muscle loads (dataset muscles, synonyms mapped to target names)
@@ -116,8 +117,8 @@ src/
                        write_favourite, write_document (raw escape hatch, protected keys refused)
     workouts/          write_log_workout, write_update_workout, delete_workout (volume, topW,
                        PR badges and exWeights as the app sets them)
-    routines/          write_routine (exercise list replaced; unmanaged item fields carried over
-                       per exercise; superset labels → sg ids), write_copy_routine,
+    routines/          write_routine (items in read_routine's format; per exercise a field left
+                       out is kept and null removes it; app defaults and checks), write_copy_routine,
                        delete_routine (also off weekdays and dates, as the app does),
                        write_week_plan, write_day_plan
     media/             read_media_usage, write_download_media, write_attach_media,

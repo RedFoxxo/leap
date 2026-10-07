@@ -18,15 +18,9 @@ describe.runIf(LIVE)('AI Coach (live, fixture provider)', () => {
     const change = review.json.proposal.changes[0]
     expect(change).toMatchObject({ type: 'sets', target: { routineId: 'r-push', exId: '0025', exerciseName: 'barbell bench press' }, before: 4, after: 5 })
 
+    // As howToApply says: read the routine, change the one field, write the exercises back as they were read.
     const routine = (await c.call('read_routine', { id: 'r-push' })).json
-    const exercises = routine.exercises.map((e: Record<string, any>) => ({
-      exerciseId: e.id,
-      sets: e.id === change.target.exId ? change.after : e.sets,
-      ...(e.reps ? { reps: e.reps } : {}),
-      ...(e.repsMin ? { repsMin: e.repsMin, repsMax: e.repsMax } : {}),
-      ...(e.weight ? { weight: e.weight } : {}),
-      ...(e.side ? { perSide: true } : {}),
-    }))
+    const exercises = routine.exercises.map((e: Record<string, unknown>) => (e.exerciseId === change.target.exId ? { ...e, sets: change.after } : e))
     expect((await c.call('write_routine', { id: 'r-push', exercises })).json.saved).toBe(true)
     expect((await c.call('write_coach_resolve', { accepted: [change.id] })).json).toMatchObject({ kind: 'review', accepted: [change.id] })
 

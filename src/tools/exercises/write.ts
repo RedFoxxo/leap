@@ -148,7 +148,7 @@ export const deleteCustomExercise = defineTool({
     return change(
       ctx,
       'delete the custom exercise',
-      (draft) => {
+      (draft, { now }) => {
         const ex = listOf(draft, 'customEx').find((x) => x.id === args.id)
         if (!ex) return refuse(`no custom exercise with id "${args.id}"`)
         const snapshot: Entry = {}
@@ -171,6 +171,7 @@ export const deleteCustomExercise = defineTool({
           if (!items.some((x) => isRecord(x) && x.id === args.id)) continue
           r.ex = items.filter((x) => !(isRecord(x) && x.id === args.id))
           cleanupSupersets(r.ex as unknown[])
+          r._ts = now
           routines.push(String(r.name ?? r.id))
         }
         if (args.id in mapOf(draft, 'exWeights')) delete writableMap(draft, 'exWeights')[args.id]

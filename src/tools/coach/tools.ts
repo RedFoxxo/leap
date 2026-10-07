@@ -56,7 +56,7 @@ function annotate(pending: unknown, state: State | null, exercises: ExerciseInde
 }
 
 const HOW_TO_APPLY = {
-  review: 'Apply each accepted change with leap\'s write tools (e.g. write_routine for sets, reps, exercises and progression, write_week_plan for the week), then call write_coach_resolve with accepted and rejected change ids.',
+  review: 'Apply each accepted change with leap\'s write tools: for a routine change, read_routine, change that field of that exercise, and write the exercises back with write_routine (fields left as they were stay as they are); write_week_plan for the week. Then call write_coach_resolve with the accepted and rejected change ids.',
   create: 'To take the plan: create its routines with write_routine (and custom exercises with write_custom_exercise first), set the week with write_week_plan using the new routine ids, then write_coach_resolve with accepted: ["plan"]. To drop it: write_coach_resolve with dismissed: true.',
   debrief: 'A debrief changes nothing; mark it read with write_coach_resolve accepted: ["debrief"].',
 }
