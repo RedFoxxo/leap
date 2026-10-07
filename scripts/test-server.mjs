@@ -91,7 +91,7 @@ async function start() {
   const coach = await fetch(`${ORIGIN}/api/admin/coach/config`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${paired.json.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: true, provider: 'fixture' }),
+    body: JSON.stringify({ enabled: true, provider: 'fixture', caps: { perProfileDaily: 0, instanceDaily: 0 } }),
   })
   if (!coach.ok) throw new Error(`enabling the Coach: ${coach.status} ${await coach.text()}`)
 
