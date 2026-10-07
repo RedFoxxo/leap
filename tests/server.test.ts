@@ -42,3 +42,17 @@ describe('tool naming contract', () => {
     await h.close()
   })
 })
+
+describe('sync notes', () => {
+  it('every tool whose change a later phone edit can undo says so', async () => {
+    const h = await harness()
+    const tools = new Map((await h.listTools()).map((t) => [t.name, t.description ?? '']))
+    for (const name of ['write_settings', 'write_goal_weight', 'write_week_plan', 'write_day_plan', 'write_document']) {
+      expect(tools.get(name), name).toMatch(/from the copy changed last/)
+    }
+    for (const name of [...tools.keys()].filter((n) => n.startsWith('delete_') && !['delete_media_sweep', 'delete_all_sessions', 'delete_coach_data', 'delete_media'].includes(n))) {
+      expect(tools.get(name), name).toMatch(/no record of deletions/)
+    }
+    await h.close()
+  })
+})

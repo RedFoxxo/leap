@@ -7,7 +7,7 @@ import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
 import { exerciseId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
-import { change, RESURRECTION_NOTE } from '../write.js'
+import { change, LAST_CHANGE_NOTE, RESURRECTION_NOTE } from '../write.js'
 
 const weight = z.number().positive().max(1000)
 const sameNumber = (a: unknown, b: number) => typeof a === 'number' && Math.abs(a - b) < 1e-9
@@ -69,7 +69,7 @@ export const deleteBodyweight = defineTool({
 
 export const writeGoalWeight = defineTool({
   name: 'write_goal_weight',
-  description: 'Set the goal body weight (targetW) in the profile unit, or clear it with null.',
+  description: `Set the goal body weight (targetW) in the profile unit, or clear it with null. ${LAST_CHANGE_NOTE}`,
   input: { weight: weight.nullable() },
   async handler(args, ctx) {
     return change(
@@ -126,7 +126,7 @@ const SETTINGS = {
 export const writeSettings = defineTool({
   name: 'write_settings',
   description:
-    'Change profile settings; only the ones given change. The weight unit is not changed here: switching it converts every stored weight, which the app does.',
+    `Change profile settings; only the ones given change. The weight unit is not changed here: switching it converts every stored weight, which the app does. ${LAST_CHANGE_NOTE}`,
   input: SETTINGS,
   async handler(args, ctx) {
     const given = Object.entries(args).filter(([, v]) => v !== undefined)
@@ -215,7 +215,7 @@ const RAW_PROTECTED = new Set([...LIST_KEYS, ...MAP_KEYS, 'unit', 'unitSet', 're
 export const writeDocument = defineTool({
   name: 'write_document',
   description:
-    'Escape hatch: set one top-level value of the profile document that no dedicated tool covers (a setting from a newer openGym version), or remove it with null. Refused for training data, the unit and openGym\'s own bookkeeping. Check the current value with read_document first.',
+    `Escape hatch: set one top-level value of the profile document that no dedicated tool covers (a setting from a newer openGym version), or remove it with null. Refused for training data, the unit and openGym\'s own bookkeeping. Check the current value with read_document first. ${LAST_CHANGE_NOTE}`,
   input: { key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/), value: z.unknown() },
   async handler(args, ctx) {
     if (RAW_PROTECTED.has(args.key)) return invalid(`"${args.key}" has a dedicated tool or belongs to openGym; it cannot be set raw`)

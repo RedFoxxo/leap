@@ -9,7 +9,7 @@ import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
 import { entryId, exerciseId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
-import { change, RESURRECTION_NOTE } from '../write.js'
+import { change, LAST_CHANGE_NOTE, RESURRECTION_NOTE } from '../write.js'
 
 const POLICIES = ['off', 'linear', 'greyskull', 'double', 'time'] as const
 
@@ -286,7 +286,7 @@ const weekdayKey = z
 export const writeWeekPlan = defineTool({
   name: 'write_week_plan',
   description:
-    'Set the routines planned on weekdays, e.g. { "Monday": [pushId], "Friday": [pushId, legsId] }. Several routines on one day make a combined session; an empty list makes the day a rest day. Weekdays not given are left as they are. Date overrides (write_day_plan) still win on their dates.',
+    `Set the routines planned on weekdays, e.g. { "Monday": [pushId], "Friday": [pushId, legsId] }. Several routines on one day make a combined session; an empty list makes the day a rest day. Weekdays not given are left as they are. Date overrides (write_day_plan) still win on their dates. ${LAST_CHANGE_NOTE}`,
   input: { days: z.record(weekdayKey, z.array(entryId).max(5)) },
   async handler(args, ctx) {
     const entries = Object.entries(args.days)
@@ -318,7 +318,7 @@ export const writeWeekPlan = defineTool({
 export const writeDayPlan = defineTool({
   name: 'write_day_plan',
   description:
-    'Override the plan for one date: a routine id, "rest", or null to go back to the weekly plan. A date takes one routine (combined days come from the weekly plan).',
+    `Override the plan for one date: a routine id, "rest", or null to go back to the weekly plan. A date takes one routine (combined days come from the weekly plan). ${LAST_CHANGE_NOTE}`,
   input: { date: isoDate, plan: z.union([entryId, z.null()]).describe('Routine id, "rest", or null') },
   async handler(args, ctx) {
     return change(

@@ -83,6 +83,16 @@ leap must keep every key it does not know, unchanged.
   device holds unsent changes comes back on that device's merge. openGym
   documents this as a known limit. leap's delete tools say so and verify.
 
+**Verified** (2026-10-07) by running openGym's own `mergeStates` over
+documents leap wrote, against a phone copy holding an unsynced change made
+before and after leap's write: logged and edited workouts, routines, custom
+exercises, weigh-ins and exercise notes survive in both cases, and PR badges
+stay consistent. Settings, the week plan and date overrides survive only when
+the phone's change was made before leap's write; made after, the phone's copy
+is newer and its values win as a whole (the same happens between two app
+devices). Deleted workouts come back in both cases (no tombstones). The
+affected tools say so in their descriptions.
+
 What leap does on every write:
 
 1. Read the document and its `rev`.
