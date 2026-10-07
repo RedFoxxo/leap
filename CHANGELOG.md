@@ -27,3 +27,7 @@ MCP clients in the server handshake.
 - Stats: `read_exercise_history` (sessions with records), `read_records`,
   `read_training_summary` (per week, month or day) and `read_muscle_balance`.
   Estimated 1RM by Epley (default), Brzycki or Lombardi, with openGym's rules.
+- First writes: `write_bodyweight` and `delete_bodyweight`, `write_goal_weight`,
+  `write_settings`, `write_exercise_note`, `write_favourite`, and
+  `write_document` for settings no dedicated tool covers. Every write reports
+  the new revision, conflicts it redid, and anything that did not persist.
