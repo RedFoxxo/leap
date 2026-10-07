@@ -91,7 +91,7 @@ export function beatsWeight(weight: number, previous: number, assisted = false):
 
 /** Every workout an exercise was done in, oldest first, with records marked against all earlier sessions. */
 export function exerciseSessions(state: State | null, exerciseId: string, exercises: ExerciseIndex, formula: Formula = 'epley'): Session[] {
-  const assisted = exercises.get(exerciseId)?.equipment === 'assisted'
+  const assisted = exercises.assisted(exerciseId)
   const out: Session[] = []
   let topWeight = 0
   let topEstimate = 0

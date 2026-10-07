@@ -19,7 +19,7 @@ import { isRecord, type Entry, type State } from '../../state/types.js'
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
-export const isAssisted = (exercises: ExerciseIndex, id: string) => exercises.get(id)?.equipment === 'assisted'
+export const isAssisted = (exercises: ExerciseIndex, id: string) => exercises.assisted(id)
 
 /** Rounds away float noise (33.75 × 12 sums) without hiding real decimals. */
 export const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits

@@ -31,6 +31,8 @@ export interface Exercise {
   /** English instruction steps (built-in exercises). */
   steps: string[]
   custom: boolean
+  /** Custom exercises: explicitly marked as an assistance machine (or explicitly not). */
+  assisted?: boolean
   /** Custom exercises: description and link. */
   description?: string
   url?: string
@@ -172,9 +174,23 @@ export function customExercises(state: State | null): Exercise[] {
     if (target) e.target = target
     if (description) e.description = description
     if (url) e.url = url
+    if (typeof c.assisted === 'boolean') e.assisted = c.assisted
     out.push(e)
   }
   return out
+}
+
+/**
+ * Whether lighter is better (an assistance machine), as openGym decides it: an
+ * explicit `assisted` flag wins; otherwise a leverage machine whose name says
+ * "assist(ed)" (the assisted pull-up, dip and their variants). The dataset's
+ * "assisted" equipment is partner-assisted stretches and the like, where
+ * heavier is still harder, so it does not count.
+ */
+export function isAssisted(e: Exercise | undefined): boolean {
+  if (!e) return false
+  if (typeof e.assisted === 'boolean') return e.assisted
+  return e.equipment === 'leverage machine' && /\bassist(ed)?\b/i.test(e.name)
 }
 
 /** Every exercise the profile can use: built-in ones and its own, by id. */
@@ -196,6 +212,10 @@ export class ExerciseIndex {
 
   get(id: string): Exercise | undefined {
     return this.byId.get(id)
+  }
+
+  assisted(id: string): boolean {
+    return isAssisted(this.byId.get(id))
   }
 
   /** The exercise's name, or its id when it is unknown (deleted custom exercise, names unavailable). */

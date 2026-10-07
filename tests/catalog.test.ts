@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { BuiltinCatalogProvider, customExercises, defaultCacheFile, DATASET, ExerciseIndex, slimDataset } from '../src/catalog/exercises.js'
+import { BuiltinCatalogProvider, customExercises, defaultCacheFile, DATASET, ExerciseIndex, isAssisted, slimDataset } from '../src/catalog/exercises.js'
 import { DATASET_RECORDS, fixtureCatalog } from './fixtures/exercises.js'
 import { FetchStub } from './helpers/fetch-stub.js'
 
@@ -97,5 +97,17 @@ describe('ExerciseIndex', () => {
 
   it('reads custom exercises defensively', () => {
     expect(customExercises({ customEx: [null, { n: 'no id' }, { id: 'c1' }] })).toEqual([{ id: 'c1', name: 'c1', secondary: [], steps: [], custom: true }])
+  })
+})
+
+describe('isAssisted', () => {
+  it('follows openGym: an explicit flag, else a leverage machine named assisted', () => {
+    const ex = (name: string, equipment: string, assisted?: boolean) => ({ id: 'x', name, equipment, secondary: [], steps: [], custom: false, ...(assisted !== undefined ? { assisted } : {}) })
+    expect(isAssisted(ex('assisted pull-up', 'leverage machine'))).toBe(true)
+    expect(isAssisted(ex('lever assisted chin-up', 'leverage machine'))).toBe(true)
+    expect(isAssisted(ex('assisted lying leg raise', 'assisted'))).toBe(false)
+    expect(isAssisted(ex('lever seated row', 'leverage machine'))).toBe(false)
+    expect(isAssisted(ex('band pull-up', 'band', true))).toBe(true)
+    expect(isAssisted(ex('assisted pull-up', 'leverage machine', false))).toBe(false)
   })
 })
