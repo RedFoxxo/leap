@@ -1,6 +1,6 @@
 {
   "name": "@redfoxxo/leap",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "MCP server for openGym: log, edit and analyze your workouts, routines, body weight and PRs on your self-hosted instance",
   "keywords": [
     "mcp",

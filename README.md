@@ -4,7 +4,7 @@ An MCP server for [openGym](https://github.com/DuarteSantos8/openGym): lets AI
 assistants log, edit and analyze your workouts, routines, body weight and PRs on
 your self-hosted instance, through openGym's own HTTP API.
 
-Work in progress (0.1.0, unreleased). See [CHANGELOG.md](CHANGELOG.md).
+Version 1.0.0. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Why leap
 
@@ -64,7 +64,7 @@ Keep the token out of config files: export it in your shell profile
   "mcp": {
     "leap": {
       "type": "local",
-      "command": ["npx", "-y", "@redfoxxo/leap@0"],
+      "command": ["npx", "-y", "@redfoxxo/leap@1"],
       "environment": {
         "OPENGYM_URL": "https://gym.example.com",
         "OPENGYM_TOKEN": "{env:OPENGYM_TOKEN}"

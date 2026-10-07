@@ -13,7 +13,7 @@ Goal: **full coverage.** Everything the API offers a signed-in profile is
 reachable: training data (read, create, update, delete), computed stats, media,
 the AI Coach, account settings and, for admin profiles, administration.
 
-Status: 0.1.0, scaffold. See "Status and remaining work" at the end.
+Status: 1.0.0, released 2026-10-07. See "Status and remaining work" at the end.
 
 ## Licensing rule
 
@@ -231,4 +231,6 @@ an AI conversation; passkey ceremonies, which need a device; push
 subscriptions, which belong to a browser. A test asserts that no tool takes a
 password, token or secret.
 
-Remaining: a review of the whole branch, then the first release (0.1.0).
+Released as 1.0.0 (2026-10-07) after three focused reviews (openGym parity,
+security, tool contracts), fuzzing of the media parsers and a check of leap's
+writes with openGym's own merge code.
