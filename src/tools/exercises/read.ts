@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Exercise } from '../../catalog/exercises.js'
+import { muscleName } from '../../domain/stats.js'
 import { isRecord, mapOf, unitOf } from '../../state/types.js'
 import { loadProfile } from '../context.js'
 import { failure, success } from '../respond.js'
@@ -46,7 +47,7 @@ export const readExercises = defineTool({
         words.every((w) => e.name.toLowerCase().includes(w) || e.id === w) &&
         (!args.bodyPart || lower(e.bodyPart) === lower(args.bodyPart)) &&
         (!args.equipment || lower(e.equipment) === lower(args.equipment)) &&
-        (!args.target || lower(e.target) === lower(args.target)),
+        (!args.target || (e.target !== undefined && muscleName(e.target) === muscleName(args.target))),
     )
     const query = words.join(' ')
     matches.sort(
@@ -70,7 +71,7 @@ export const readExercises = defineTool({
 export const readExercise = defineTool({
   name: 'read_exercise',
   description:
-    'One exercise by id: name, body part, equipment, target and secondary muscles, instruction steps (built-in, English) or description and link (custom), plus the profile\'s standing note for it, whether it is a favourite, and the remembered working weight (`lastWeight`, in the profile unit).',
+    'One exercise by id: name, body part, equipment, target and secondary muscles, instruction steps (built-in, English) or description, link, muscles and photo or video (custom; the hash works with write_download_media and delete_media), plus the profile\'s standing note for it, whether it is a favourite, and the remembered working weight (`lastWeight`, in the profile unit).',
   input: { id: exerciseId },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
@@ -89,6 +90,9 @@ export const readExercise = defineTool({
       ...(e.steps.length ? { steps: e.steps } : {}),
       ...(e.description ? { description: e.description } : {}),
       ...(e.url ? { url: e.url } : {}),
+      ...(e.primaryMuscles ? { primaryMuscles: e.primaryMuscles } : {}),
+      ...(e.secondaryMuscles ? { secondaryMuscles: e.secondaryMuscles } : {}),
+      ...(e.media ? { media: { hash: e.media.hash, kind: e.media.kind, mime: e.media.mime, size: e.media.size, width: e.media.width, height: e.media.height } } : {}),
       ...(note ? { note } : {}),
       ...(isRecord(memory) && typeof memory.w === 'number'
         ? { lastWeight: { weight: memory.w, unit: unitOf(state), ...(typeof memory.d === 'string' ? { date: memory.d } : {}) } }

@@ -13,7 +13,13 @@ export interface ToolDef<S extends z.ZodRawShape = z.ZodRawShape> {
   name: string
   description: string
   input: S
-  handler: (args: z.output<z.ZodObject<S>>, ctx: ToolContext) => Promise<ToolOutput>
+  handler: (args: z.output<z.ZodObject<S>>, ctx: ToolContext, call: ToolCall) => Promise<ToolOutput>
+}
+
+/** Per-call details from the MCP client. */
+export interface ToolCall {
+  /** Aborted when the client cancels the call. */
+  signal?: AbortSignal | undefined
 }
 
 /** Keeps the handler's argument type tied to its schema. */

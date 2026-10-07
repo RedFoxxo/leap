@@ -25,7 +25,7 @@ export function createServer(ctx: ToolContext, tools: AnyToolDef[] = allTools())
           openWorldHint: true,
         },
       },
-      async (args: Record<string, unknown>) => tool.handler(args, ctx),
+      async (args: Record<string, unknown>, extra: { signal?: AbortSignal }) => tool.handler(args, ctx, { signal: extra?.signal }),
     )
   }
 

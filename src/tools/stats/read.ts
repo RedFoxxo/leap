@@ -123,6 +123,8 @@ function range(args: { from?: string | undefined; to?: string | undefined }, def
   return { from: args.from ?? addDays(to, -(defaultDays - 1)), to }
 }
 
+const MAX_PERIODS = 400
+
 export const readTrainingSummary = defineTool({
   name: 'read_training_summary',
   description:
@@ -135,10 +137,13 @@ export const readTrainingSummary = defineTool({
   async handler(args, ctx) {
     const { from, to } = range(args, 84)
     if (from > to) return invalid('from is after to')
+    const by = args.groupBy ?? 'week'
+    const span = (dateOf(to).getTime() - dateOf(from).getTime()) / 86_400_000
+    const count = by === 'day' ? span + 1 : by === 'week' ? span / 7 + 1 : span / 28 + 1
+    if (count > MAX_PERIODS) return invalid(`too many ${by}s (${Math.round(count)}); choose a shorter range or group by ${by === 'day' ? 'week or month' : 'month'}`)
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { state } = profile.data
-    const by = args.groupBy ?? 'week'
     const weekStart = state?.weekStart === 0 ? 0 : 1
     const periods = new Map<string, { workouts: number; minutes: number; workSets: number; reps: number; volume: number }>()
     const blank = () => ({ workouts: 0, minutes: 0, workSets: 0, reps: 0, volume: 0 })

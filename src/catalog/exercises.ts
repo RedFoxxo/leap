@@ -33,6 +33,10 @@ export interface Exercise {
   custom: boolean
   /** Custom exercises: explicitly marked as an assistance machine (or explicitly not). */
   assisted?: boolean
+  /** Custom exercises: the app's body-map muscles as stored, and the photo or video reference. */
+  primaryMuscles?: string[]
+  secondaryMuscles?: string[]
+  media?: Record<string, unknown>
   /** Custom exercises: description and link. */
   description?: string
   url?: string
@@ -179,6 +183,9 @@ export function customExercises(state: State | null): Exercise[] {
     if (description) e.description = description
     if (url) e.url = url
     if (typeof c.assisted === 'boolean') e.assisted = c.assisted
+    if (texts(c.primaries).length) e.primaryMuscles = texts(c.primaries)
+    if (texts(c.secondaries).length) e.secondaryMuscles = texts(c.secondaries)
+    if (isRecord(c.media)) e.media = c.media
     out.push(e)
   }
   return out

@@ -39,6 +39,7 @@ export const readProfile = defineTool({
     ])
     if (!me.ok) return failure('Could not read the signed-in profile', me)
     if (!snapshot.ok) return failure('Could not read the profile', snapshot)
+    if (!me.data?.user || typeof me.data.user.id !== 'string') return failure('openGym answered without a profile; check OPENGYM_URL points at openGym')
     const { state, rev } = snapshot.data
     const workouts = listOf(state, 'workouts')
     const day = today()

@@ -26,8 +26,9 @@ export const readAccount = defineTool({
     } else if (password.status !== 404) return failure('Could not read the account', password)
     else out.passwordLogin = 'off on this instance'
     if (!passkeys.ok) return failure('Could not read the passkeys', passkeys)
-    out.passkeys = passkeys.data.passkeys.map(({ id, name, created, lastUsed }) => ({ id, name: name ?? null, created, lastUsed }))
-    if (passkeys.data.lastWayIn) out.lastWayIn = true
+    const list = Array.isArray(passkeys.data?.passkeys) ? passkeys.data.passkeys : []
+    out.passkeys = list.map(({ id, name, created, lastUsed }) => ({ id, name: name ?? null, created, lastUsed }))
+    if (passkeys.data?.lastWayIn) out.lastWayIn = true
     return success(out)
   },
 })

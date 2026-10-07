@@ -247,9 +247,9 @@ export const deleteMediaSweep = defineTool({
     'Delete at once every stored photo and video of the profile that nothing references any more, instead of waiting for the grace period. At most 10 times an hour.',
   input: {},
   async handler(_args, ctx: ToolContext) {
-    const r = await ctx.http.request<{ removed: number; freedBytes: number; usage: Parameters<typeof usageOf>[0] }>({ method: 'POST', path: '/api/media/sweep', json: {} })
+    const r = await ctx.http.request<{ removed?: number; freedBytes?: number; usage?: Parameters<typeof usageOf>[0] }>({ method: 'POST', path: '/api/media/sweep', json: {} })
     if (!r.ok) return failure('The sweep did not run', r)
-    return success({ removed: r.data.removed, freedMB: Math.round((r.data.freedBytes / MB) * 10) / 10, usage: usageOf(r.data.usage) })
+    return success({ removed: r.data?.removed ?? 0, freedMB: Math.round(((r.data?.freedBytes ?? 0) / MB) * 10) / 10, usage: usageOf(r.data?.usage) })
   },
 })
 

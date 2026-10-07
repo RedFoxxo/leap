@@ -114,7 +114,7 @@ export const readWeekPlan = defineTool({
     })
     return success({
       weekStartsOn: WEEKDAYS[weekStart],
-      week: Object.fromEntries(order.map((d) => [WEEKDAYS[d], named(weekdayRoutineIds(state, d))])),
+      week: Object.fromEntries(order.map((d) => [WEEKDAYS[d], named(weekdayRoutineIds(state, d).filter((id) => listOf(state, 'routines').some((r) => r.id === id)))])),
       days,
     })
   },
@@ -125,7 +125,7 @@ const round1 = (v: number) => Math.round(v * 10) / 10
 export const readBodyweight = defineTool({
   name: 'read_bodyweight',
   description:
-    'Body-weight log (one weigh-in per day), newest first, in the profile unit: the latest weigh-in, the goal (targetW) and the distance to it, the change over the last 7 and 30 days, and the entries in the range (default the last 30).',
+    'Body-weight log (one weigh-in per day), newest first, in the profile unit: the latest weigh-in, the goal (targetW) and the distance to it, the change over the 7 and 30 days up to the latest weigh-in, and the entries in the range (default the newest 30).',
   input: {
     from: isoDate.optional(),
     to: isoDate.optional(),

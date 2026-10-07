@@ -11,7 +11,7 @@ import type { ToolOutput } from './types.js'
 export function written<R>(r: Written<R>, shown: Record<string, unknown>): ToolOutput {
   if (r.unchanged) return success({ saved: false, unchanged: true, note: 'That is already how the profile stands; nothing was written.', ...shown })
   return success({
-    saved: true,
+    saved: r.notPersisted.length ? 'partly' : true,
     revision: r.rev,
     ...shown,
     ...(r.notPersisted.length ? { notPersisted: r.notPersisted } : {}),

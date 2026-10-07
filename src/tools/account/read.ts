@@ -15,6 +15,7 @@ export const readMe = defineTool({
   async handler(_args, ctx) {
     const r = await ctx.http.request<{ user: SessionUser; token?: string }>({ method: 'GET', path: '/api/me' })
     if (!r.ok) return failure('Could not read the signed-in profile', r)
+    if (!r.data?.user || typeof r.data.user.id !== 'string') return failure('openGym answered without a profile; check OPENGYM_URL points at openGym')
     const { id, name, admin } = r.data.user
     return success({ id, name, admin: admin === true, tokenRenewalDue: typeof r.data.token === 'string' })
   },
