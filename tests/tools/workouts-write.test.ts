@@ -142,6 +142,22 @@ describe('write_log_workout', () => {
   })
 })
 
+describe('assistance machines while the catalogue is unavailable', () => {
+  it('still judges the built-in ones by less help', async () => {
+    const fake = new FakeOpenGym(profile(), 40)
+    const h = await harness({
+      stub: fake.stub,
+      context: { now: () => NOW, builtinExercises: async () => ({ exercises: new Map(), error: 'built-in exercise names are unavailable (offline)' }) },
+    })
+    await h.call('write_log_workout', { date: '2026-10-01', entries: [{ exerciseId: '0017', sets: [{ weight: 30, reps: 8 }, { weight: 25, reps: 6 }] }] })
+    const r = await h.call('write_log_workout', { date: '2026-10-03', entries: [{ exerciseId: '0017', sets: [{ weight: 20, reps: 8 }] }] })
+    expect(r.json.logged.prs).toEqual(['0017'])
+    const first = (fake.state as any).workouts.find((w: { d: string }) => w.d === '2026-10-01')
+    expect(first.entries[0].topW).toBe(25)
+    await h.close()
+  })
+})
+
 describe('write_update_workout', () => {
   it('replaces sets, recomputes volume and badges, lowers the remembered weight it took away', async () => {
     const { h, doc, workout } = await setup()

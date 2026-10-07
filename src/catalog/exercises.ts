@@ -181,6 +181,14 @@ export function customExercises(state: State | null): Exercise[] {
 }
 
 /**
+ * The catalogue's assistance machines by id (assisted chest dip, close-grip
+ * and plain pull-up, standing chin-up and pull-up, triceps dip, wide-grip dip,
+ * lever chin-up), so they are judged right even when the catalogue could not be
+ * downloaded. Verified against the pinned dataset by a test.
+ */
+export const ASSISTED_IDS: ReadonlySet<string> = new Set(['0009', '0015', '0017', '1431', '1432', '0019', '2364', '0572'])
+
+/**
  * Whether lighter is better (an assistance machine), as openGym decides it: an
  * explicit `assisted` flag wins; otherwise a leverage machine whose name says
  * "assist(ed)" (the assisted pull-up, dip and their variants). The dataset's
@@ -215,7 +223,8 @@ export class ExerciseIndex {
   }
 
   assisted(id: string): boolean {
-    return isAssisted(this.byId.get(id))
+    const e = this.byId.get(id)
+    return e ? isAssisted(e) : ASSISTED_IDS.has(id)
   }
 
   /** The exercise's name, or its id when it is unknown (deleted custom exercise, names unavailable). */
