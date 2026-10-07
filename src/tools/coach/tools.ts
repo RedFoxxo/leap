@@ -26,7 +26,7 @@ function coachFailure(summary: string, e: Err) {
     shared: "In this instance's setup the provider account belongs to another profile.",
     unprivileged: 'The server cannot run Coach jobs safely (no unprivileged user); an admin has to fix the setup.',
   }
-  return failure(e.code && reasons[e.code] ? reasons[e.code]! : summary, e)
+  return failure(e.code && Object.hasOwn(reasons, e.code) ? reasons[e.code]! : summary, e)
 }
 
 /** Exercise and routine names next to the ids a proposal carries, so it can be read and applied. */

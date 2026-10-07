@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
-import { openSync, closeSync, readFileSync, realpathSync, statSync, writeSync } from 'node:fs'
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync, unlinkSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, resolve, sep } from 'node:path'
 import { inspect, KIND_OF, type MediaInfo, type MediaMime } from './inspect.js'
 import { stripMetadata } from './strip.js'
 
@@ -34,11 +34,25 @@ export const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('
  */
 export function prepareUpload(path: string): Prepared {
   const real = realpathSync(expandPath(path))
-  const st = statSync(real)
-  if (!st.isFile()) throw new Error(`${real} is not a file`)
-  if (st.size === 0) throw new Error(`${real} is empty`)
-  if (st.size > MAX_FILE_BYTES) throw new Error(`${real} is ${Math.round(st.size / 1048576)} MB; openGym takes at most 200 MB`)
-  const original = new Uint8Array(readFileSync(real))
+  // One handle for the checks and the read, so the path cannot be swapped in between; a pipe or device
+  // opened non-blocking is refused by the size and type checks instead of hanging the server.
+  const fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+  let original: Uint8Array
+  try {
+    const st = fstatSync(fd)
+    if (!st.isFile()) throw new Error(`${real} is not a file`)
+    if (st.size === 0) throw new Error(`${real} is empty`)
+    if (st.size > MAX_FILE_BYTES) throw new Error(`${real} is ${Math.round(st.size / 1048576)} MB; openGym takes at most 200 MB`)
+    original = new Uint8Array(st.size)
+    let read = 0
+    while (read < st.size) {
+      const n = readSync(fd, original, read, st.size - read, read)
+      if (n === 0) throw new Error(`${real} changed while it was read`)
+      read += n
+    }
+  } finally {
+    closeSync(fd)
+  }
   const info = inspect(original)
   if (info.hasLocation) {
     throw new Error('this video records where it was filmed; remove the location first (e.g. export it again without location) — leap does not upload it')
@@ -62,12 +76,13 @@ const EXT: Record<MediaMime, string> = {
   'video/webm': 'webm',
 }
 
-export const extensionOf = (mime: string) => (mime in KIND_OF ? EXT[mime as MediaMime] : 'bin')
+export const extensionOf = (mime: string) => (Object.hasOwn(KIND_OF, mime) ? EXT[mime as MediaMime] : 'bin')
 
 /**
  * Writes a new file; an existing path is never overwritten. A directory gets
- * `<hash>.<ext>`; a file name must carry the extension of the file's type, so a
- * download can never become a script, a key or a start-up file.
+ * `<hash>.<ext>`; a file name must carry the extension of the file's type, and
+ * no part of the path may be hidden (shells and desktops load files from
+ * hidden folders such as ~/.bashrc.d or ~/.config/autostart).
  */
 export function saveNew(target: string, hash: string, mime: string, bytes: Uint8Array): string {
   let path = expandPath(target)
@@ -83,11 +98,15 @@ export function saveNew(target: string, hash: string, mime: string, bytes: Uint8
     const allowed = ext === 'jpg' ? ['jpg', 'jpeg'] : [ext]
     if (!allowed.some((e) => path.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
   }
+  if (path.split(sep).some((part) => part.startsWith('.'))) throw new Error('downloads are not saved in hidden folders or as hidden files')
   const fd = openSync(path, 'wx', 0o600)
   try {
-    writeSync(fd, bytes)
-  } finally {
+    for (let done = 0; done < bytes.length; ) done += writeSync(fd, bytes, done, bytes.length - done)
+  } catch (error) {
     closeSync(fd)
+    unlinkSync(path)
+    throw error
   }
+  closeSync(fd)
   return path
 }

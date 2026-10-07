@@ -35,6 +35,8 @@ export interface RequestSpec {
   keepTokens?: boolean
   /** Overrides the default timeout (file transfers). */
   timeoutMs?: number
+  /** `bytes` only: refuse a body larger than this. */
+  maxBytes?: number
 }
 
 export interface Bytes {
@@ -44,7 +46,7 @@ export interface Bytes {
 
 const DEFAULT_TIMEOUT_MS = 60_000
 /** Routes whose answers can carry a session token: a renewed one on /api/me, pairing, a password change. */
-const TOKEN_ROUTES = /^\/api\/(me|pair\/|account\/|login|register|device-link)/
+const TOKEN_ROUTES = /^\/api\/(me$|pair\/|account\/|login|register|device-link)/
 const BODY_CAP = 4000
 
 /**
@@ -128,8 +130,14 @@ export class HttpCore {
     }
 
     if (response.ok && spec.expect === 'bytes') {
+      const declared = Number(response.headers.get('content-length'))
+      if (spec.maxBytes && Number.isFinite(declared) && declared > spec.maxBytes) {
+        await response.body?.cancel()
+        return err(response.status, `the file is larger than the ${Math.round(spec.maxBytes / 1048576)} MB leap accepts`, '', shown)
+      }
       try {
-        const data = new Uint8Array(await response.arrayBuffer())
+        const data = await readCapped(response, spec.maxBytes)
+        if (!data) return err(response.status, `the file is larger than the ${Math.round((spec.maxBytes ?? 0) / 1048576)} MB leap accepts`, '', shown)
         return ok({ data, contentType: response.headers.get('content-type') ?? 'application/octet-stream' }, response.status)
       } catch (error) {
         return err(response.status, `Could not read the file (${error instanceof Error ? error.message : String(error)})`, '', shown)
@@ -161,6 +169,28 @@ export class HttpCore {
       return err(response.status, `Expected JSON from openGym but got ${describeBody(text)}`, capBody(text), shown)
     }
   }
+}
+
+/** The body as bytes, or undefined once it passes `max` (the rest is not read). */
+async function readCapped(response: Response, max: number | undefined): Promise<Uint8Array | undefined> {
+  if (!max || !response.body) return new Uint8Array(await response.arrayBuffer())
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    total += chunk.length
+    if (total > max) {
+      await response.body.cancel().catch(() => {})
+      return undefined
+    }
+    chunks.push(chunk)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    out.set(c, at)
+    at += c.length
+  }
+  return out
 }
 
 function errorResult(response: Response, text: string, shown: string): Err {

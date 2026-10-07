@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { prepareUpload, saveNew, sha256, type Prepared } from '../../media/files.js'
+import { MAX_FILE_BYTES, prepareUpload, saveNew, sha256, type Prepared } from '../../media/files.js'
 import { KIND_OF, type MediaMime } from '../../media/inspect.js'
 import { apply, refuse } from '../../state/store.js'
 import { isRecord, listOf, writableList, type Entry, type State } from '../../state/types.js'
@@ -123,7 +123,7 @@ export const writeAttachMedia = defineTool({
       timeoutMs: TRANSFER_TIMEOUT_MS,
     })
     if (!up.ok) return failure('openGym did not take the file', up)
-    const mime = (up.data.mime in KIND_OF ? up.data.mime : prepared.info.mime) as MediaMime
+    const mime = (typeof up.data?.mime === 'string' && Object.hasOwn(KIND_OF, up.data.mime) ? up.data.mime : prepared.info.mime) as MediaMime
 
     return change(
       ctx,
@@ -221,7 +221,7 @@ export const writeDownloadMedia = defineTool({
     'Download one of the profile\'s photos or videos (by hash, see read_workout or read_exercise) to a new file on this computer. `saveTo` is an absolute path (~/ allowed): a directory gets "<hash>.<ext>"; a file name must end in the extension of the file\'s type (.jpg, .png, .webp, .gif, .mp4, .mov, .webm). An existing file is never overwritten. The download is checked against its hash.',
   input: { hash, saveTo: z.string().min(1).max(4096) },
   async handler(args, ctx) {
-    const r = await ctx.http.request({ method: 'GET', path: `/api/media/${args.hash}`, expect: 'bytes', timeoutMs: TRANSFER_TIMEOUT_MS })
+    const r = await ctx.http.request({ method: 'GET', path: `/api/media/${args.hash}`, expect: 'bytes', timeoutMs: TRANSFER_TIMEOUT_MS, maxBytes: MAX_FILE_BYTES })
     if (!r.ok) return failure(r.status === 404 ? 'openGym does not have that file for this profile' : 'Could not download the file', r)
     if (sha256(r.data.data) !== args.hash) return failure('The download does not match its hash; nothing was saved')
     const mime = r.data.contentType.split(';')[0]!.trim()
