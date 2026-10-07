@@ -43,6 +43,11 @@ MCP clients in the server handshake.
   names, link, assistance flag) and `delete_custom_exercise` (taken out of
   routines, favourites and remembered weights; history keeps its name).
   Muscle balance counts custom exercises with the built-in ones.
+- Photos and videos: `write_attach_media` uploads a local file to a workout
+  or custom exercise, after removing location, camera and time metadata from
+  photos (the orientation stays); videos that record a location are refused.
+  `read_media` downloads to a new file, `read_media_usage` shows space and
+  limits, `delete_media` detaches, `delete_media_sweep` frees space at once.
 - Fixed: assistance machines (where less weight is better) are now recognised
   as openGym recognises them, a leverage machine named "assisted" or a custom
   exercise marked so; before, 15 exercises with the dataset's "assisted"

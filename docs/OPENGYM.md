@@ -259,6 +259,22 @@ differ from the app's.
   with `size` equal to the byte count. A `poster` (still image, at most 480 px)
   is what lists show.
 - Files no longer referenced are deleted after a 14-day grace period.
+- A ref (**source**: `lib/media-refs.js` `normalizeMediaRef`) is `{ kind, hash,
+  mime, size, width, height, dur?, codec?, poster?, at }`; `kind` must match the
+  mime (`image/gif` is always `gif`), size 1 B–200 MB, sides 1–16384 px,
+  `dur` 0–3600 s, `codec` one of `avc1 hvc1 av01 vp09 vp8 vp9 other`. The
+  poster is optional. Anything else reads as "no media".
+- A workout keeps at most 6 (`WORKOUT_MEDIA_MAX`), no hash twice; adding or
+  removing one stamps the workout's `_ts` (`lib/workout-media.js`). A custom
+  exercise has one `media`.
+- Size caps per kind come from `GET /api/config` → `media` (MB of 2^20; images
+  2 MB by default). The app re-encodes photos to fit and removes metadata; the
+  server never alters a file. leap cannot re-encode: it removes metadata from
+  stills without touching pixels (keeping the orientation as a minimal EXIF
+  block in JPEG and WebP), refuses videos that record a location, and reports
+  files over the cap. **Verified**: stripped fixtures decode to identical
+  pixels (Pillow, EXIF rotation applied); the real API accepted stripped JPEG,
+  GIF and an MP4.
 
 ## Coach
 

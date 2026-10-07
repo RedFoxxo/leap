@@ -1,4 +1,5 @@
 import { profileReadTools } from './account/profile.js'
+import { mediaDeleteTools, mediaReadTools, mediaWriteTools } from './media/tools.js'
 import { accountReadTools } from './account/read.js'
 import { exerciseReadTools } from './exercises/read.js'
 import { exerciseDeleteTools, exerciseWriteTools } from './exercises/write.js'
@@ -20,14 +21,17 @@ export function allTools(): AnyToolDef[] {
     ...planReadTools,
     ...statsReadTools,
     ...exerciseReadTools,
+    ...mediaReadTools,
     ...accountReadTools,
     ...workoutWriteTools,
     ...routineWriteTools,
     ...exerciseWriteTools,
     ...settingsWriteTools,
+    ...mediaWriteTools,
     ...workoutDeleteTools,
     ...routineDeleteTools,
     ...exerciseDeleteTools,
     ...settingsDeleteTools,
+    ...mediaDeleteTools,
   ]
 }

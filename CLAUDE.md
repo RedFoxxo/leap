@@ -88,6 +88,12 @@ src/
     workouts.ts        sorting, PR badge rebuild, remembered-weight raise/lower (the app's rules)
     stats.ts           1RM formulas and best set, PR rule (beatsWeight), exercise sessions,
                        muscle loads (dataset muscles, synonyms mapped to target names)
+  media/
+    inspect.ts         type sniffing and pixel size / duration / codec from file headers
+                       (JPEG, PNG, GIF, WebP, MP4/MOV, WebM), video location detection
+    strip.ts           metadata removal for stills (orientation kept), no re-encoding
+    files.ts           reading local uploads (regular files of an accepted type only) and
+                       saving downloads (new files only, never overwriting)
   state/
     types.ts           the loosely typed profile document, list/map accessors
     store.ts           load, and update(): the one write path (see "Writing the profile")
@@ -112,6 +118,8 @@ src/
                        per exercise; superset labels → sg ids), write_copy_routine,
                        delete_routine (also off weekdays and dates, as the app does),
                        write_week_plan, write_day_plan
+    media/             read_media_usage, read_media (download), write_attach_media,
+                       delete_media (detach), delete_media_sweep
     write.ts           change(): runs a mutation through the store and reports it the same way
                        for every write tool (saved, revision, notPersisted, conflictsRedone, warnings)
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
@@ -193,9 +201,14 @@ best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
 profile), `read_profile`, `read_settings`, `read_document`, stats (PRs match
 openGym's on the demo profile), body weight, goal, settings, notes,
 favourites and the raw write, routines and the plan, workouts (verified live
-and against openGym's own code), custom exercises (verified live).
+and against openGym's own code), custom exercises, media (verified live).
+
+Local files: leap reads a file only for `write_attach_media` (a regular file
+whose bytes are one of the seven media types) and writes one only for
+`read_media` (a new file, mode 600, never overwriting). Photos lose their
+metadata before upload; videos with a location are refused. Both decided with
+the user (2026-10-07).
 
 Planned, in order:
 
-1. Media: upload, attach to workouts and custom exercises, download, usage.
-2. Coach, account, admin.
+1. Coach, account, admin.

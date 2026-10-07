@@ -49,6 +49,10 @@ Keep the token out of config files: export it in your shell profile
   [exercise dataset](https://github.com/hasaneyldrm/exercises-dataset) openGym
   itself uses (a pinned version, hash-checked, about 17 MB) and caches a small
   copy in `~/.cache/leap`. No token or profile data is sent there.
+- Photos and videos are read from paths you name, and only if they really are
+  JPEG, PNG, WebP, GIF, MP4, MOV or WebM. Photos lose their metadata (where and
+  when they were taken, the camera) before upload, keeping their rotation;
+  videos that record a location are refused. Downloads go to new files only.
 - Before every write, leap saves a copy of your profile in
   `~/.local/state/leap/backups/<instance>` (the newest 50, readable only by you).
 
@@ -90,14 +94,15 @@ Keep the token out of config files: export it in your shell profile
 **read**: `read_profile`, `read_settings`, `read_workouts`, `read_workout`, `read_routines`, `read_routine`,
 `read_week_plan`, `read_bodyweight`, `read_exercise_history`, `read_records`,
 `read_training_summary`, `read_muscle_balance`, `read_exercises`, `read_exercise`,
+`read_media_usage`, `read_media`,
 `read_me`, `read_instance`, `read_document`
 
 **write**: `write_log_workout`, `write_update_workout`, `write_routine`, `write_copy_routine`, `write_week_plan`,
 `write_day_plan`, `write_custom_exercise`, `write_bodyweight`, `write_goal_weight`, `write_settings`,
-`write_exercise_note`, `write_favourite`, `write_document`
+`write_exercise_note`, `write_favourite`, `write_attach_media`, `write_document`
 
 **delete**: `delete_workout`, `delete_routine`, `delete_custom_exercise`,
-`delete_bodyweight`
+`delete_bodyweight`, `delete_media`, `delete_media_sweep`
 
 More tools are on the way; see [CLAUDE.md](CLAUDE.md) for the plan.
 

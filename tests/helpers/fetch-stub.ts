@@ -121,6 +121,7 @@ export class FetchStub {
       status = payload.status
       payload = payload.body
     }
+    if (payload instanceof Uint8Array) return new Response(payload, { status, headers: { 'content-type': 'application/octet-stream', ...route.headers } })
     const text = typeof payload === 'string' ? payload : JSON.stringify(payload ?? null)
     return new Response(text, {
       status,
