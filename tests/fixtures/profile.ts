@@ -100,7 +100,7 @@ export function profile(): Record<string, unknown> {
     exWeights: { '0025': { w: 82.5, d: '2026-10-05' } },
     exNotes: { '0025': 'grip at the rings' },
     favEx: ['0025'],
-    coach: { consent: true },
+    coach: { consent: { agreedAt: '2026-10-01T08:00:00.000Z', version: 1 } },
     futureFeature: { keep: 'me' },
   }
 }

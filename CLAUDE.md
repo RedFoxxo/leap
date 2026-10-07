@@ -120,6 +120,9 @@ src/
                        write_week_plan, write_day_plan
     media/             read_media_usage, read_media (download), write_attach_media,
                        delete_media (detach), delete_media_sweep
+    coach/             read_coach, read_coach_cohort, write_coach_request (plan, review,
+                       debrief; waits for the answer), write_coach_resolve, write_coach_share,
+                       delete_coach_data. Proposals are applied with the write tools (option A)
     write.ts           change(): runs a mutation through the store and reports it the same way
                        for every write tool (saved, revision, notPersisted, conflictsRedone, warnings)
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
@@ -209,6 +212,10 @@ whose bytes are one of the seven media types) and writes one only for
 metadata before upload; videos with a location are refused. Both decided with
 the user (2026-10-07).
 
+AI Coach (verified live with the fixture provider). Applying a proposal is
+done with leap's write tools, not by re-implementing the app's apply code
+(decided with the user, 2026-10-07). leap never gives consent.
+
 Planned, in order:
 
-1. Coach, account, admin.
+1. Account and admin.

@@ -281,4 +281,24 @@ differ from the app's.
 `POST /api/coach/plan|review|debrief` answers 202 with a job; the outcome comes
 through `GET /api/coach/status` (the app polls every 3 s). A proposal is applied
 by the client editing the state, then `POST /api/coach/pending/resolve`.
-Consent lives in `state.coach`. (**source**: `api/coach/jobs.js`)
+(**source**: `api/coach/jobs.js`, `views/CoachChat.jsx`)
+
+- Consent is `state.coach.consent = { agreedAt: ISO, version }`, written by the
+  app's consent screen and checked by the server on every job (403 `consent`).
+  leap never writes it: `coach` is in the store's protected keys.
+- Proposal kinds: `review` (a `changes` list, each `{ id, type, target:
+  { routineId, exId }, before, after, why }`), `create` (a plan `bundle` with
+  `routines`, `week`, `customEx`), `debrief` (`score`, `highlights`, `watch`,
+  `nextTime` about one `workout`). Proposals expire after 14 days.
+- Resolve bodies, as the app sends them: a review `{ accepted: [change ids],
+  rejected: [...] }`, a plan `{ accepted: ["plan"] }`, a debrief
+  `{ accepted: ["debrief"] }`, or `{ dismissed: true }`. The status's `last`
+  then reads `applied` or `dismissed`.
+- leap applies accepted changes with its own write tools (decided with the
+  user, 2026-10-07) instead of re-implementing the app's apply code. It does
+  not write the app's Coach log or snapshots in `state.coach` (the app uses
+  them to show history and revert).
+- Test setup: `POST /api/admin/coach/config { enabled: true, provider:
+  "fixture" }` turns on the built-in fixture provider, which answers every job
+  kind deterministically. **Verified** live: review → change applied with
+  `write_routine` → resolved → `last.outcome` `applied`.

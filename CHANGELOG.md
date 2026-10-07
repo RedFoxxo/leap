@@ -48,6 +48,11 @@ MCP clients in the server handshake.
   photos (the orientation stays); videos that record a location are refused.
   `read_media` downloads to a new file, `read_media_usage` shows space and
   limits, `delete_media` detaches, `delete_media_sweep` frees space at once.
+- AI Coach: `write_coach_request` (a plan, a review or a debrief; waits for
+  the answer), `read_coach` (the waiting proposal with names and how to apply
+  it with leap's tools), `write_coach_resolve`, `read_coach_cohort`,
+  `write_coach_share` and `delete_coach_data`. leap never gives consent; that
+  stays in the app.
 - Fixed: assistance machines (where less weight is better) are now recognised
   as openGym recognises them, a leverage machine named "assisted" or a custom
   exercise marked so; before, 15 exercises with the dataset's "assisted"
