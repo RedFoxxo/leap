@@ -24,3 +24,6 @@ MCP clients in the server handshake.
   `read_bodyweight` (goal, 7- and 30-day change).
 - `read_profile` (overview, today and the next training day), `read_settings`
   and `read_document`, the raw escape hatch for any part of the profile.
+- Stats: `read_exercise_history` (sessions with records), `read_records`,
+  `read_training_summary` (per week, month or day) and `read_muscle_balance`.
+  Estimated 1RM by Epley (default), Brzycki or Lombardi, with openGym's rules.

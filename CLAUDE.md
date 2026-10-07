@@ -85,6 +85,8 @@ src/
                        rows, modes; volume, completed reps, best weight, entry routine
     plan.ts            weekday plan (list or legacy single id), date overrides, routine lookup
     dates.ts           local calendar days (`YYYY-MM-DD`), weekdays
+    stats.ts           1RM formulas and best set, PR rule (beatsWeight), exercise sessions,
+                       muscle loads (dataset muscles, synonyms mapped to target names)
   state/
     types.ts           the loosely typed profile document, list/map accessors
     store.ts           load, and update(): the one write path (see "Writing the profile")
@@ -97,6 +99,8 @@ src/
     exercises/         read_exercises, read_exercise
     training/          read_workouts, read_workout, read_routines, read_routine,
                        read_week_plan, read_bodyweight; format.ts shapes workouts for output
+    stats/             read_exercise_history, read_records, read_training_summary,
+                       read_muscle_balance
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
 scripts/test-server.mjs  throwaway openGym API in Docker for live tests
 tests/                 contract tests (tools/), helpers (fetch stub, MCP harness, stateful
@@ -173,10 +177,13 @@ layer (verified live, including a real 409 from a second writer), the exercise
 catalogue with `read_exercises` and `read_exercise` (verified live), training
 reads: workouts, routines, week plan, body weight (verified live; volume and
 best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
-profile), `read_profile`, `read_settings`, `read_document`.
+profile), `read_profile`, `read_settings`, `read_document`, stats (PRs match
+openGym's on the demo profile).
 
 Planned, in order:
 
-1. Stats: 1RM, PRs, exercise history, volume, muscle balance.
-3. Write and delete tools for training data and settings.
-4. Media, Coach, account, admin.
+1. Write and delete tools for training data and settings. Logging or editing a
+   workout must set `vol`, `topW` and `prs` the way the app does, and rebuild
+   later sessions' PR badges when history changes (`rebuildPrHistory`, see
+   docs/OPENGYM.md "Stats").
+2. Media, Coach, account, admin.

@@ -1,6 +1,7 @@
 import { profileReadTools } from './account/profile.js'
 import { accountReadTools } from './account/read.js'
 import { exerciseReadTools } from './exercises/read.js'
+import { statsReadTools } from './stats/read.js'
 import { planReadTools } from './training/plan.js'
 import { workoutReadTools } from './training/workouts.js'
 import type { ToolDef } from './types.js'
@@ -9,5 +10,5 @@ export type AnyToolDef = ToolDef<any>
 
 /** Every tool leap registers, in registration order. */
 export function allTools(): AnyToolDef[] {
-  return [...profileReadTools, ...workoutReadTools, ...planReadTools, ...exerciseReadTools, ...accountReadTools]
+  return [...profileReadTools, ...workoutReadTools, ...planReadTools, ...statsReadTools, ...exerciseReadTools, ...accountReadTools]
 }

@@ -202,6 +202,16 @@ differ from the app's.
 - Estimated 1RM: Epley `w × (1 + r/30)` by default; Brzycki `w × 36/(37 − r)`;
   Lombardi `w × r^0.1`. One rep is the weight itself; above 12 reps there is no
   estimate; rounded to 0.1.
+- The best set for the estimate: completed, non-warm-up rows in reps mode,
+  each done side of a per-side row on its own; none for assistance machines.
+  (**source**: `onerm.js` `bestSetOf`)
+- Weight PR (`prs`): the session's best completed working load beats the best
+  of every earlier session; with no earlier load, the first one counts. On an
+  assistance machine (equipment `assisted`) the smaller load is better.
+  (**source**: `exercises.js` `beatsWeight`, `sheets.jsx` finish flow,
+  `workout-date.js` `rebuildPrHistory`). **Verified**: leap marks the same PRs
+  as openGym on 30 of the demo profile's 33 workouts; the 3 others are its
+  first week, where the demo generator deliberately stores no badges.
 - Muscle balance: done, non-warm-up sets per muscle; primary muscles count 1,
   secondary 0.4.
 
