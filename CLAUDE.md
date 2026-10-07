@@ -102,8 +102,10 @@ tests/                 contract tests (tools/), helpers (fetch stub, MCP harness
   really returns and drive the real client through the MCP server
   (`tests/helpers/harness.ts`). Required for every tool.
 - **Live tests** (`npm run test:live`, `tests/live/`) run only with
-  `OPENGYM_LIVE=1`. Write tests run against a throwaway local instance
-  (Docker), never a real profile.
+  `OPENGYM_LIVE=1`. Write tests run against a throwaway local instance,
+  never a real profile: `scripts/test-server.mjs start` runs the official API
+  image in Docker with password login and an admin test profile, and writes
+  `OPENGYM_URL`/`OPENGYM_TOKEN` to `.cache/test-server/env` (see DEVELOPMENT.md).
 - When fixing a bug, first write a test that fails against the old code.
 
 ## Status and remaining work

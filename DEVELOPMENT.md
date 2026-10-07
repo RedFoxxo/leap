@@ -41,14 +41,20 @@ Run `npm run typecheck`, `npm test` and `npm run build` before every commit.
 ## Live tests
 
 Live tests hit the instance in `OPENGYM_URL`, run only with `OPENGYM_LIVE=1`,
-and are never part of `npm test`:
+and are never part of `npm test`. Run them against a throwaway instance, never
+against a profile you care about. `scripts/test-server.mjs` starts one in Docker
+(the official `opengym-api` image, API only, on `127.0.0.1:3999`), registers an
+admin test profile with password login, pairs it, and writes the variables to
+`.cache/test-server/env`:
 
 ```sh
+node scripts/test-server.mjs start
+set -a; . .cache/test-server/env; set +a
 npm run test:live
+node scripts/test-server.mjs stop     # removes the container and its data
 ```
 
-Run write tests against a throwaway instance, never against a profile you care
-about.
+`OPENGYM_IMAGE` picks another image tag, `OPENGYM_TEST_PORT` another port.
 
 ## Branches
 
