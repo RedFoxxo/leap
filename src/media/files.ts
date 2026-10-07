@@ -44,6 +44,11 @@ export function prepareUpload(path: string): Prepared {
     throw new Error('this video records where it was filmed; remove the location first (e.g. export it again without location) — leap does not upload it')
   }
   const bytes = stripMetadata(original, info.mime)
+  // What is uploaded must still be the same picture: read it again rather than trust the stripper.
+  const again = inspect(bytes)
+  if (again.mime !== info.mime || again.width !== info.width || again.height !== info.height) {
+    throw new Error('the file could not be cleaned of its metadata without changing it; it is not uploaded')
+  }
   return { path: real, bytes, info, hash: sha256(bytes), stripped: original.length - bytes.length }
 }
 

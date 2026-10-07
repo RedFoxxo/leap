@@ -121,6 +121,13 @@ function jpeg(b: Uint8Array): { width: number; height: number; orientation: numb
   throw new Error('a JPEG without a frame header')
 }
 
+/** No real photo or video has this many chunks, boxes or elements in one walk; a file that does is crafted. */
+export const MAX_ELEMENTS = 65_536
+
+export function tooMany(): never {
+  throw new Error('a damaged file (too many parts)')
+}
+
 export interface RiffChunk {
   type: string
   /** Offset of the chunk header. */
@@ -142,6 +149,7 @@ export function riffChunks(b: Uint8Array): RiffChunk[] {
     if (at + 8 + size > b.length) break
     const end = Math.min(b.length, at + 8 + size + (size & 1))
     out.push({ type: ascii(b, at, 4), at, end, data: b.subarray(at + 8, at + 8 + size) })
+    if (out.length > MAX_ELEMENTS) tooMany()
     at = end
   }
   return out
@@ -190,6 +198,7 @@ function boxes(b: Uint8Array, from: number, to: number): Box[] {
     } else if (size === 0) size = to - at
     if (size < header || at + size > to) break
     out.push({ type: ascii(b, at + 4, 4), start: at + header, end: at + size })
+    if (out.length > MAX_ELEMENTS) tooMany()
     at += size
   }
   return out
@@ -230,8 +239,8 @@ function isoBmff(b: Uint8Array): { width: number; height: number; dur?: number; 
   throw new Error('a video without a video track')
 }
 
-/** Sample formats of tracks that record position: GoPro's GPMF telemetry and Google's camera motion metadata. */
-export const TELEMETRY_CODECS: ReadonlySet<string> = new Set(['gpmd', 'camm'])
+/** Sample formats of tracks that record position: GoPro's GPMF, Google's camera motion and DJI's telemetry. */
+export const TELEMETRY_CODECS: ReadonlySet<string> = new Set(['gpmd', 'camm', 'djmd'])
 
 const bytesOf = (s: string) => [...s].map((c) => c.charCodeAt(0))
 /**
@@ -251,10 +260,22 @@ export function locationIn(area: Uint8Array): boolean {
   })
 }
 
-/** The movie header and the top-level metadata boxes (not the media data) carry any location. */
+/** Boxes that only group others; metadata can sit anywhere below them. */
+const CONTAINERS = new Set(['moov', 'trak', 'mdia', 'minf', 'edts', 'udta'])
+/** Boxes that hold metadata; only these are searched, never sample tables or media data. */
+const METADATA = new Set(['udta', 'meta', 'uuid', 'keys', 'ilst', 'loci', '\u00a9xyz'])
+
+/** Location metadata in the metadata boxes of the file, or a track that records position. */
 function hasLocation(b: Uint8Array, top: Box[], moov: Box): boolean {
-  if (locationIn(b.subarray(moov.start, moov.end))) return true
-  if (top.some((x) => (x.type === 'uuid' || x.type === 'meta' || x.type === 'udta') && locationIn(b.subarray(x.start, x.end)))) return true
+  const areas: Box[] = []
+  const visit = (list: Box[], depth: number) => {
+    for (const x of list) {
+      if (METADATA.has(x.type)) areas.push(x)
+      if (CONTAINERS.has(x.type) && depth < 8) visit(boxes(b, x.start, x.end), depth + 1)
+    }
+  }
+  visit(top.filter((x) => x.type !== 'mdat'), 0)
+  if (areas.some((x) => x.type === 'loci' || x.type === '\u00a9xyz' || locationIn(b.subarray(x.start, x.end)))) return true
   for (const trak of boxes(b, moov.start, moov.end).filter((x) => x.type === 'trak')) {
     const mdia = child(b, trak, 'mdia')
     const minf = mdia && child(b, mdia, 'minf')
@@ -289,6 +310,7 @@ function ebml(b: Uint8Array, from: number, to: number): { id: number; start: num
     const start = at + id.length + size.length
     const end = size.unknown ? to : Math.min(to, start + size.value)
     out.push({ id: id.value, start, end })
+    if (out.length > MAX_ELEMENTS) tooMany()
     if (id.value === 0x1f43b675) break
     at = end
   }
@@ -313,7 +335,7 @@ function matroska(b: Uint8Array): { width: number; height: number; dur?: number;
     if (top.id === 0x1549a966) {
       for (const e of ebml(b, top.start, top.end)) {
         if (e.id === 0x2ad7b1) scale = uintOf(b, e.start, e.end)
-        if (e.id === 0x4489) {
+        if (e.id === 0x4489 && (e.end - e.start === 4 || e.end - e.start === 8)) {
           const view = new DataView(b.buffer, b.byteOffset + e.start, e.end - e.start)
           duration = e.end - e.start === 4 ? view.getFloat32(0) : view.getFloat64(0)
         }

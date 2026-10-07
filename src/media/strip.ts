@@ -1,4 +1,4 @@
-import { exifOrientation, riffChunks, type MediaMime } from './inspect.js'
+import { exifOrientation, MAX_ELEMENTS, riffChunks, tooMany, type MediaMime } from './inspect.js'
 
 /**
  * Removes metadata from a still image without touching its pixels: EXIF (GPS
@@ -62,12 +62,26 @@ function scanEnd(b: Uint8Array, from: number): number {
  * end-of-image marker, and drops what follows it: a motion photo's video,
  * further images with their own metadata, vendor trailers.
  */
+const damagedJpeg = (): never => {
+  throw new Error('a damaged JPEG')
+}
+
+/** A JFIF header without its thumbnail: the thumbnail can show the picture before it was cropped. */
+function jfifWithoutThumbnail(seg: Uint8Array): Uint8Array {
+  if (seg.length < 16) damagedJpeg()
+  // Marker, length 16, then identifier, version, units and densities (12 bytes) and a 0×0 thumbnail.
+  return Uint8Array.from([0xff, 0xe0, 0x00, 0x10, ...seg.subarray(4, 16), 0, 0])
+}
+
 function stripJpeg(b: Uint8Array): Uint8Array {
   const jfif: Uint8Array[] = []
   const kept: Uint8Array[] = []
   let at = 2
   let orientation = 1
-  while (at + 2 <= b.length && b[at] === 0xff) {
+  let scans = 0
+  while (at < b.length) {
+    // Between segments only markers (and fill bytes) may stand; anything else is a damaged file, not an end.
+    if (b[at] !== 0xff || at + 2 > b.length) damagedJpeg()
     const marker = b[at + 1]!
     if (marker === 0xff) {
       at++
@@ -77,29 +91,31 @@ function stripJpeg(b: Uint8Array): Uint8Array {
       kept.push(b.subarray(at, at + 2))
       break
     }
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      kept.push(b.subarray(at, at + 2))
-      at += 2
-      continue
-    }
-    if (at + 4 > b.length) break
+    // Restart and TEM markers belong inside image data, which scanEnd steps over; here they mean a crafted file.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) damagedJpeg()
+    if (at + 4 > b.length) damagedJpeg()
     const len = (b[at + 2]! << 8) | b[at + 3]!
+    if (len < 2) damagedJpeg()
     const end = Math.min(b.length, at + 2 + len)
+    if (kept.length + jfif.length > MAX_ELEMENTS) tooMany()
     if (marker === 0xda) {
       const data = scanEnd(b, end)
       kept.push(b.subarray(at, data))
+      scans++
       at = data
       continue
     }
     const seg = b.subarray(at, end)
     const isApp = marker >= 0xe0 && marker <= 0xef
     if (marker === 0xe1 && ascii(b, at + 4, 6) === 'Exif\0\0') orientation = exifOrientation(b.subarray(at + 10, end))
-    if (marker === 0xe0 && (ascii(b, at + 4, 5) === 'JFIF\0' || ascii(b, at + 4, 5) === 'JFXX\0')) jfif.push(seg)
-    else if ((marker === 0xe2 && ascii(b, at + 4, 12) === 'ICC_PROFILE\0') || (marker === 0xee && ascii(b, at + 4, 5) === 'Adobe') || (!isApp && marker !== 0xfe)) {
+    if (marker === 0xe0 && ascii(b, at + 4, 5) === 'JFIF\0') {
+      if (!jfif.length) jfif.push(jfifWithoutThumbnail(seg))
+    } else if ((marker === 0xe2 && ascii(b, at + 4, 12) === 'ICC_PROFILE\0') || (marker === 0xee && ascii(b, at + 4, 5) === 'Adobe') || (!isApp && marker !== 0xfe)) {
       kept.push(seg)
     }
     at = end
   }
+  if (!scans || kept.at(-1)?.[1] !== 0xd9) damagedJpeg()
   // Start of image, the JFIF header, the orientation where EXIF belongs, then the kept segments and scans up to the end of the image.
   return concat([b.subarray(0, 2), ...jfif, ...(orientation > 1 ? [orientationExif(orientation)] : []), ...kept])
 }
@@ -116,6 +132,7 @@ function stripPng(b: Uint8Array): Uint8Array {
     const end = at + 12 + len
     if (end > b.length) break
     if (PNG_KEEP.has(type)) parts.push(b.subarray(at, end))
+    if (parts.length > MAX_ELEMENTS) tooMany()
     at = end
     if (type === 'IEND') break
   }
@@ -127,22 +144,25 @@ export function webpExifTiff(chunk: Uint8Array): Uint8Array {
   return ascii(chunk, 0, 6) === 'Exif\0\0' ? chunk.subarray(6) : chunk
 }
 
+/** Chunks that make up the picture (and its animation and colour profile); EXIF, XMP and anything unknown go. */
+const WEBP_KEEP = new Set(['VP8X', 'VP8 ', 'VP8L', 'ALPH', 'ANIM', 'ANMF', 'ICCP'])
+
 function stripWebp(b: Uint8Array): Uint8Array {
-  if (ascii(b, 12, 4) !== 'VP8X') return b
+  const extended = ascii(b, 12, 4) === 'VP8X'
   const parts: Uint8Array[] = []
   let orientation = 1
   for (const c of riffChunks(b)) {
     if (c.type === 'EXIF') orientation = exifOrientation(webpExifTiff(c.data))
-    if (c.type !== 'EXIF' && c.type !== 'XMP ') parts.push(b.subarray(c.at, c.end))
+    if (WEBP_KEEP.has(c.type)) parts.push(b.subarray(c.at, c.end))
   }
-  if (orientation > 1) {
+  if (extended && orientation > 1) {
     // The TIFF part of the minimal EXIF block (without "Exif\0\0"); 26 bytes, so no padding.
     const tiff = orientationExif(orientation).subarray(10)
     parts.push(new Uint8Array([0x45, 0x58, 0x49, 0x46, tiff.length, 0, 0, 0]), tiff)
   }
   const body = concat(parts)
   // VP8X flags: bit 3 EXIF (only the orientation is left), bit 2 XMP (gone).
-  body[8] = (body[8]! & ~0x0c) | (orientation > 1 ? 0x08 : 0)
+  if (extended) body[8] = (body[8]! & ~0x0c) | (orientation > 1 ? 0x08 : 0)
   const out = concat([b.subarray(0, 12), body])
   const riff = out.length - 8
   out[4] = riff & 0xff
@@ -163,6 +183,7 @@ function stripGif(b: Uint8Array): Uint8Array {
     return p + 1
   }
   while (at < b.length) {
+    if (parts.length > MAX_ELEMENTS) tooMany()
     const intro = b[at]
     if (intro === 0x3b) {
       parts.push(b.subarray(at, at + 1))

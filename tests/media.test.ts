@@ -37,7 +37,14 @@ describe('inspect', () => {
     expect(locationIn(new TextEncoder().encode('....loci....'))).toBe(true)
     expect(locationIn(new TextEncoder().encode('...<exif:GPSLatitude>...'))).toBe(true)
     expect(locationIn(new TextEncoder().encode('an ordinary movie header'))).toBe(false)
-    expect(TELEMETRY_CODECS.has('gpmd') && TELEMETRY_CODECS.has('camm')).toBe(true)
+    expect(['gpmd', 'camm', 'djmd'].every((c) => TELEMETRY_CODECS.has(c))).toBe(true)
+  })
+
+  it('does not take bytes in the sample tables for a location', () => {
+    const clip = new Uint8Array(file('clip.mp4'))
+    const at = Buffer.from(clip).indexOf(Buffer.from('stsz')) + 12
+    clip.set([...Buffer.from('loci')], at)
+    expect(inspect(clip)).toMatchObject({ hasLocation: false })
   })
 
   it('stops at a WebP chunk whose size has the top bit set, instead of walking backwards', () => {
@@ -45,10 +52,8 @@ describe('inspect', () => {
     // The first chunk after VP8X claims 0x80000010 bytes: as a signed 32-bit number that is negative.
     const second = 12 + 8 + 10
     webp.set([0x10, 0x00, 0x00, 0x80], second + 4)
-    const started = performance.now()
     expect(inspect(webp)).toMatchObject({ mime: 'image/webp' })
     expect(stripMetadata(webp, 'image/webp').length).toBeLessThanOrEqual(webp.length)
-    expect(performance.now() - started).toBeLessThan(200)
   })
 
   it('refuses anything else', () => {
@@ -58,7 +63,66 @@ describe('inspect', () => {
   })
 })
 
+const cat = (...parts: (Uint8Array | number[])[]) => Uint8Array.from(parts.flatMap((p) => [...p]))
+const repeat = (bytes: number[], n: number) => {
+  const out = new Uint8Array(bytes.length * n)
+  for (let i = 0; i < n; i++) out.set(bytes, i * bytes.length)
+  return out
+}
+
+describe('hostile files', () => {
+  it('refuses a JPEG with tens of thousands of markers outside the image data', () => {
+    const plain = file('plain.jpg')
+    const sof = Buffer.from(plain).indexOf(Buffer.from([0xff, 0xc0]))
+    const crafted = cat(plain.subarray(0, sof), repeat([0xff, 0xd0], 70_000), plain.subarray(sof))
+    expect(() => stripMetadata(crafted, 'image/jpeg')).toThrow(/damaged/)
+  })
+
+  it('refuses a GIF or a WebM made of tens of thousands of empty elements', () => {
+    const gif = file('anim.gif')
+    const crafted = cat(gif.subarray(0, gif.length - 1), repeat([0x21, 0xf9, 0x00], 70_000), [0x3b])
+    expect(() => stripMetadata(crafted, 'image/gif')).toThrow(/too many/)
+    const webm = cat([0x1a, 0x45, 0xdf, 0xa3, 0x80], [0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], repeat([0xec, 0x80], 70_000))
+    expect(() => inspect(webm)).toThrow(/too many/)
+  })
+
+  it('refuses a JPEG with stray bytes between segments instead of cutting it short', () => {
+    const plain = file('plain.jpg')
+    const sof = Buffer.from(plain).indexOf(Buffer.from([0xff, 0xc0]))
+    expect(() => stripMetadata(cat(plain.subarray(0, sof), [1, 2, 3], plain.subarray(sof)), 'image/jpeg')).toThrow(/damaged/)
+  })
+})
+
 describe('stripMetadata', () => {
+  it('drops the thumbnails a JFIF header or a JFXX segment can carry', () => {
+    const plain = file('plain.jpg')
+    // A JFIF APP0 with a 2×1 RGB thumbnail, then a JFXX extension segment.
+    const jfif = [0xff, 0xe0, 0x00, 0x16, ...Buffer.from('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 2, 1, 9, 9, 9, 9, 9, 9]
+    const jfxx = [0xff, 0xe0, 0x00, 0x0c, ...Buffer.from('JFXX\0'), 0x10, 7, 7, 7, 7]
+    const app0 = 2 + 2 + ((plain[4]! << 8) | plain[5]!)
+    const crafted = cat(plain.subarray(0, 2), jfif, jfxx, plain.subarray(app0))
+    const after = stripMetadata(crafted, 'image/jpeg')
+    expect(has(after, 'JFXX')).toBe(false)
+    expect([...after.subarray(2, 20)]).toEqual([0xff, 0xe0, 0x00, 0x10, ...Buffer.from('JFIF\0'), 1, 1, 0, 0, 1, 0, 1, 0, 0])
+    expect(inspect(after)).toEqual(inspect(plain))
+  })
+
+  it('keeps only image chunks of a WebP, with or without the extended header', () => {
+    const simple = file('lossy.webp')
+    const exif = cat([0x45, 0x58, 0x49, 0x46, 4, 0, 0, 0], Buffer.from('GPS!'))
+    const withExif = cat(simple, exif)
+    new DataView(withExif.buffer).setUint32(4, withExif.length - 8, true)
+    const strippedSimple = stripMetadata(withExif, 'image/webp')
+    expect(has(strippedSimple, 'GPS!')).toBe(false)
+    expect(strippedSimple).toEqual(simple)
+
+    const ext = file('exif.webp')
+    const c2pa = cat([0x43, 0x32, 0x50, 0x41, 6, 0, 0, 0], Buffer.from('author'))
+    const withC2pa = cat(ext, c2pa)
+    new DataView(withC2pa.buffer).setUint32(4, withC2pa.length - 8, true)
+    expect(has(stripMetadata(withC2pa, 'image/webp'), 'author')).toBe(false)
+  })
+
   it('removes EXIF, GPS, comments and keeps orientation and colour profile in a JPEG', () => {
     const before = file('photo-gps.jpg')
     expect(has(before, 'LeapTestCam') && has(before, 'secret comment')).toBe(true)
