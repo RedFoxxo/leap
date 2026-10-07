@@ -143,6 +143,21 @@ Derived when a workout is finished:
 
 `workouts` must stay sorted by `d`, then `start`: "last time" reads from the end.
 
+A workout from a combined day carries `routineIds` (all of them; `routineId`
+is the first) and a `rid` on each entry; an entry without `rid` in a workout
+where others have one belongs to no routine. A finished entry may also carry
+`target` (what was prescribed), `planned`, `sg` (superset), `note`, `notePin`
+and `noProg` (excluded from progression). (**source**: `lib/finish-workout.js`,
+`history.js` `entryRoutineId`)
+
+Volume per row (**source**: `workout-model.js` `completedVolumeOf`,
+`history.js` `workoutVolume`): a per-side row counts each completed side at its
+own `w × r` (its scalar `w`/`r` only mirror the sides: max weight, summed
+reps, done when both are); a drop set adds its drops; a rest-pause row's `r`
+already includes its bursts. **Verified**: leap's implementation reproduces
+the stored `vol` of all 33 workouts and the `topW` of all 187 entries in
+openGym's demo profile (`lib/demoSeed.js`).
+
 ## Routines
 
 `{ id, name, emoji, ex: [...], prog?, excludeFromProgression?, _ts }`.

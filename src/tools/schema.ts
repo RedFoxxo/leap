@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isValidIsoDate } from '../domain/dates.js'
 
 /** Entry ids in openGym are short strings: built-in exercises `0001`, the app's own `<base36 time><random>`. */
 const ID = /^[A-Za-z0-9_-]{1,64}$/
@@ -6,6 +7,11 @@ const ID = /^[A-Za-z0-9_-]{1,64}$/
 export const entryId = z.string().regex(ID, 'must be an id of letters, digits, "-" or "_"')
 
 export const exerciseId = entryId.describe('Exercise id, e.g. "0025" (see read_exercises)')
+
+export const isoDate = z
+  .string()
+  .refine(isValidIsoDate, 'must be a calendar date YYYY-MM-DD')
+  .describe('Date YYYY-MM-DD (the profile’s local calendar day)')
 
 export const limit = (defaultValue: number, max: number) =>
   z

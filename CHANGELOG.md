@@ -18,3 +18,7 @@ MCP clients in the server handshake.
   instructions) from the MIT exercise dataset openGym uses, downloaded once
   from a pinned commit, hash-checked and cached; plus the profile's custom
   exercises. `read_exercises` and `read_exercise`.
+- Training reads: `read_workouts`, `read_workout` (every set kind: warm-ups,
+  drop sets, rest-pause, per-side, timed, cardio), `read_routines`,
+  `read_routine`, `read_week_plan` (date overrides win over the weekday) and
+  `read_bodyweight` (goal, 7- and 30-day change).

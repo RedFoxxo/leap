@@ -80,6 +80,11 @@ src/
   catalog/
     exercises.ts       built-in exercises (pinned upstream MIT dataset, hash-checked, cached),
                        custom exercises from the profile, ExerciseIndex (names, favourites, notes)
+  domain/
+    sets.ts            how a logged set row is read: warm-ups, drop sets, rest-pause, per-side
+                       rows, modes; volume, completed reps, best weight, entry routine
+    plan.ts            weekday plan (list or legacy single id), date overrides, routine lookup
+    dates.ts           local calendar days (`YYYY-MM-DD`), weekdays
   state/
     types.ts           the loosely typed profile document, list/map accessors
     store.ts           load, and update(): the one write path (see "Writing the profile")
@@ -89,6 +94,8 @@ src/
     types.ts, context.ts, respond.ts, index.ts
     account/           read_me, read_instance
     exercises/         read_exercises, read_exercise
+    training/          read_workouts, read_workout, read_routines, read_routine,
+                       read_week_plan, read_bodyweight; format.ts shapes workouts for output
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
 scripts/test-server.mjs  throwaway openGym API in Docker for live tests
 tests/                 contract tests (tools/), helpers (fetch stub, MCP harness, stateful
@@ -162,10 +169,14 @@ Rules for mutate functions:
 
 Done: scaffold, HTTP layer, pairing, `read_me`, `read_instance`, the state
 layer (verified live, including a real 409 from a second writer), the exercise
-catalogue with `read_exercises` and `read_exercise` (verified live).
+catalogue with `read_exercises` and `read_exercise` (verified live), training
+reads: workouts, routines, week plan, body weight (verified live; volume and
+best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
+profile).
 
 Planned, in order:
 
-1. Read tools for training data and stats.
+1. Profile overview, settings and the raw-document escape hatch; stats (1RM,
+   PRs, exercise history, volume, muscle balance).
 3. Write and delete tools for training data and settings.
 4. Media, Coach, account, admin.
