@@ -73,7 +73,7 @@ export function profile(): Record<string, unknown> {
         bw: 78.4,
         note: 'Felt strong',
         entries: [
-          { id: '0025', rid: PUSH, sets: [{ w: 82.5, r: 8, done: true, rpe: 8 }, { w: 82.5, r: 7, done: true }], topW: 82.5, note: 'pause reps' },
+          { id: '0025', rid: PUSH, sg: 'sg1', sets: [{ w: 82.5, r: 8, done: true, rpe: 8 }, { w: 82.5, r: 7, done: true }], topW: 82.5, note: 'pause reps' },
           {
             id: '0294',
             rid: PUSH,

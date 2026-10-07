@@ -57,19 +57,19 @@ describe('read_workouts', () => {
 })
 
 describe('read_workout', () => {
-  it('shows every set kind', async () => {
+  it('shows every set kind in the format write_update_workout takes back', async () => {
     const { h } = await setup()
     const r = await h.call('read_workout', { id: 'w-legs' })
     const squat = r.json.entries[0]
-    expect(squat).toMatchObject({ position: 1, id: '0043', name: 'barbell full squat', volume: 3160, bestWeight: 100 })
+    expect(squat).toMatchObject({ position: 1, name: 'barbell full squat', exerciseId: '0043', volume: 3160, bestWeight: 100 })
     expect(squat.sets).toEqual([
-      { n: 1, kind: 'warmup', w: 60, r: 5, done: true },
-      { n: 2, w: 100, r: 5, done: true, rir: 2 },
-      { n: 3, type: 'dropset', w: 100, r: 5, done: true, rir: 1, drops: [{ w: 80, r: 6 }, { w: 60, r: 8 }] },
-      { n: 4, type: 'restpause', w: 100, r: 12, done: true, clusters: [{ r: 3, restSec: 15 }, { r: 2, restSec: 15 }] },
-      { n: 5, w: 100, r: 5, done: false },
+      { weight: 60, reps: 5, done: true, warmup: true },
+      { weight: 100, reps: 5, done: true, rir: 2 },
+      { weight: 100, reps: 5, done: true, rir: 1, drops: [{ weight: 80, reps: 6 }, { weight: 60, reps: 8 }] },
+      { weight: 100, reps: 12, done: true, clusters: [{ reps: 3, restSec: 15 }, { reps: 2, restSec: 15 }] },
+      { weight: 100, reps: 5, done: false },
     ])
-    expect(r.json.entries[1]).toMatchObject({ id: '9001', name: '9001', sets: [{ n: 1, mode: 'cardio', min: 20, speed: 9.5, done: true }] })
+    expect(r.json.entries[1]).toMatchObject({ exerciseId: '9001', name: '9001', sets: [{ min: 20, speed: 9.5, done: true }] })
     await h.close()
   })
 
@@ -77,16 +77,10 @@ describe('read_workout', () => {
     const { h } = await setup()
     const r = await h.call('read_workout', { date: '2026-10-05' })
     expect(r.json).toMatchObject({ id: 'w-push', end: '2026-10-05T19:10', note: 'Felt strong', unit: 'kg' })
-    expect(r.json.entries[0]).toMatchObject({ note: 'pause reps', routine: { id: PUSH, name: 'Push Day' } })
+    expect(r.json.entries[0]).toMatchObject({ note: 'pause reps', routineId: PUSH, routineName: 'Push Day' })
     expect(r.json.entries[1]).toMatchObject({ superset: 'sg1', bestWeight: 16, volume: 440 })
-    expect(r.json.entries[1].sets[1]).toEqual({
-      n: 2,
-      w: 16,
-      r: 18,
-      done: false,
-      sides: { L: { w: 16, r: 10, done: true }, R: { w: 14, r: 8, done: false } },
-    })
-    expect(r.json.entries[2]).toMatchObject({ name: 'Weighted plank', routine: { id: LEGS, name: 'Leg Day' }, sets: [{ mode: 'time', sec: 60, w: 10 }] })
+    expect(r.json.entries[1].sets[1]).toEqual({ left: { weight: 16, reps: 10, done: true }, right: { weight: 14, reps: 8, done: false } })
+    expect(r.json.entries[2]).toMatchObject({ name: 'Weighted plank', routineId: LEGS, routineName: 'Leg Day', sets: [{ sec: 60, weight: 10, done: true }] })
     expect(r.json.media).toEqual([{ kind: 'image', hash: 'a'.repeat(64), mime: 'image/webp', size: 1200 }])
     await h.close()
   })

@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import { customExercises, ExerciseIndex } from '../../catalog/exercises.js'
+import { ExerciseIndex } from '../../catalog/exercises.js'
 import { dateOf, today } from '../../domain/dates.js'
 import { routineName } from '../../domain/plan.js'
-import { bestWeight, entriesOf, workoutVolume } from '../../domain/sets.js'
+import { bestWeight, entriesOf, routineIdsOf, workoutVolume } from '../../domain/sets.js'
+import { sessionName, storedSet } from '../../domain/workout-items.js'
 import { lowerKeptWeights, raiseKeptWeights, rebuildPrHistory, sortWorkouts, type AssistedCheck } from '../../domain/workouts.js'
 import { newId } from '../../state/ids.js'
 import { apply, refuse } from '../../state/store.js'
@@ -37,27 +38,41 @@ const setInput = z
   })
   .strict()
 
+/** One exercise of a workout in the format read_workout returns; the informational fields it adds are accepted and ignored. */
 const entryInput = z
   .object({
     exerciseId,
-    sets: z.array(setInput).min(1).max(50),
-    note: z.string().max(500).optional(),
-    superset: z.string().min(1).max(20).optional().describe('Label shared by adjacent exercises done as a superset'),
-    routineId: entryId.optional().describe('On a combined day: the routine this exercise came from'),
+    sets: z.array(setInput).min(1).max(50).optional().describe('The sets; required for a new exercise, left out to keep an exercise\'s sets'),
+    note: z.string().max(500).nullable().optional().describe('Left out: kept; null or empty: removed'),
+    superset: z.string().min(1).max(64).nullable().optional().describe('Label (or the id read_workout shows) shared by adjacent exercises done as a superset; null removes it'),
+    routineId: entryId.nullable().optional().describe('On a combined day: the routine this exercise came from (inferred when left out)'),
+    position: z.number().optional().describe('Ignored (from read_workout)'),
+    name: z.string().optional().describe('Ignored (from read_workout)'),
+    routineName: z.string().optional().describe('Ignored (from read_workout)'),
+    volume: z.number().optional().describe('Ignored (from read_workout)'),
+    bestWeight: z.number().optional().describe('Ignored (from read_workout)'),
+    other: z.record(z.string(), z.unknown()).optional().describe('Ignored (from read_workout); those fields are kept as they are'),
   })
   .strict()
 
-type SetInput = z.output<typeof setInput>
 type EntryInput = z.output<typeof entryInput>
 
-function setProblems(entries: EntryInput[]): string[] {
+/** Whether a set input records something done: done defaults to true; on a per-side set, either side done is enough. */
+function completed(s: z.output<typeof setInput>): boolean {
+  if (s.left || s.right) return (s.left?.done ?? s.done ?? true) || (s.right?.done ?? s.done ?? true)
+  return s.done ?? true
+}
+
+function setProblems(entries: EntryInput[], requireSets: boolean): string[] {
   const problems: string[] = []
-  entries.forEach((e, i) =>
-    e.sets.forEach((s, j) => {
+  entries.forEach((e, i) => {
+    if (requireSets && !e.sets) problems.push(`exercise ${i + 1}: sets are required`)
+    e.sets?.forEach((s, j) => {
       const where = `exercise ${i + 1}, set ${j + 1}`
       const sided = s.left !== undefined || s.right !== undefined
       if (sided && (!s.left || !s.right)) problems.push(`${where}: a per-side set needs both left and right`)
       if (sided && (s.weight !== undefined || s.reps !== undefined)) problems.push(`${where}: give weight and reps per side, not on the set`)
+      if (sided && (s.drops || s.clusters)) problems.push(`${where}: drop sets and rest-pause are not logged on per-side sets`)
       if (s.drops && s.clusters) problems.push(`${where}: a set is a drop set or rest-pause, not both`)
       if (s.rir !== undefined && s.rpe !== undefined) problems.push(`${where}: give rir or rpe, not both`)
       const cardio = s.min !== undefined || s.speed !== undefined
@@ -65,76 +80,98 @@ function setProblems(entries: EntryInput[]): string[] {
       if (s.sec !== undefined && (s.reps !== undefined || sided)) problems.push(`${where}: a timed set takes sec (and weight), not reps`)
       if (!cardio && s.sec === undefined && !sided && s.reps === undefined) problems.push(`${where}: reps are required (or sec for a timed set, min for cardio)`)
       if (s.clusters && s.reps !== undefined && s.clusters.reduce((n, c) => n + c.reps, 0) > s.reps) problems.push(`${where}: the clusters add up to more than reps (reps is the total)`)
-    }),
-  )
-  const labels = entries.map((e) => e.superset)
+    })
+    // The app keeps only exercises with something done; an entry with no completed set would count as training that was not.
+    if (e.sets && !e.sets.some(completed)) {
+      problems.push(`exercise ${i + 1}: no completed set; leave the exercise out instead`)
+    }
+  })
+  const labels = entries.map((e) => e.superset ?? undefined)
   const seen = new Set<string>()
   labels.forEach((label, i) => {
     if (!label) return
     if (seen.has(label) && labels[i - 1] !== label) problems.push(`superset "${label}" is split; its exercises must be next to each other`)
     seen.add(label)
   })
-  for (const label of seen) if (labels.filter((l) => l === label).length < 2) problems.push(`superset "${label}" has only one exercise`)
+  // A new workout with a one-exercise superset is a mistake; on an edit, a lone id is dropped quietly, as the app does.
+  if (requireSets) for (const label of seen) if (labels.filter((l) => l === label).length < 2) problems.push(`superset "${label}" has only one exercise`)
   return problems
 }
 
-const withEffort = (row: Entry, s: { rir?: number | undefined; rpe?: number | undefined }) => {
-  if (s.rir !== undefined) row.rir = s.rir
-  if (s.rpe !== undefined) row.rpe = s.rpe
-  return row
-}
-
-/** A set as openGym stores it (docs/OPENGYM.md, "Workouts"). */
-function storedSet(s: SetInput): Entry {
-  const done = s.done ?? true
-  let row: Entry
-  if (s.left && s.right) {
-    const L = withEffort({ w: s.left.weight ?? 0, r: s.left.reps, done: s.left.done ?? done }, s.left)
-    const R = withEffort({ w: s.right.weight ?? 0, r: s.right.reps, done: s.right.done ?? done }, s.right)
-    row = { w: Math.max(Number(L.w), Number(R.w)), r: Number(L.r) + Number(R.r), done: L.done === true && R.done === true, sides: { L, R } }
-    const rirs = [L.rir, R.rir].filter((v): v is number => typeof v === 'number')
-    const rpes = [L.rpe, R.rpe].filter((v): v is number => typeof v === 'number')
-    if (rirs.length) row.rir = Math.min(...rirs)
-    else if (rpes.length) row.rpe = Math.max(...rpes)
-  } else if (s.min !== undefined || s.speed !== undefined) {
-    row = { ...(s.min !== undefined ? { min: s.min } : {}), ...(s.speed !== undefined ? { speed: s.speed } : {}), done }
-  } else if (s.sec !== undefined) {
-    row = withEffort({ sec: s.sec, w: s.weight ?? 0, done }, s)
-  } else {
-    row = withEffort({ w: s.weight ?? 0, r: s.reps ?? 0, done }, s)
-  }
-  if (s.drops) {
-    row.type = 'dropset'
-    row.drops = s.drops.map((d) => ({ w: d.weight, r: d.reps }))
-  }
-  if (s.clusters) {
-    row.type = 'restpause'
-    row.clusters = s.clusters.map((c) => ({ r: c.reps, ...(c.restSec !== undefined ? { restSec: c.restSec } : {}) }))
-  }
-  if (s.warmup) row.phase = 'warmup'
-  return row
-}
-
-/** Entry fields leap writes; others on an existing entry (muscleSnapshot, planned, notePin, ...) are kept by position. */
-const MANAGED_ENTRY = new Set(['id', 'sets', 'topW', 'note', 'sg', 'rid', 'target'])
-
-function storedEntries(inputs: EntryInput[], existing: Entry[], assisted: AssistedCheck, now: number): Entry[] {
-  const groups = new Map<string, string>()
-  return inputs.map((e, i) => {
-    const old = existing[i]?.id === e.exerciseId ? existing[i] : undefined
-    const carried = old ? Object.fromEntries(Object.entries(old).filter(([k]) => !MANAGED_ENTRY.has(k))) : {}
-    const sets = e.sets.map(storedSet)
-    const entry: Entry = { ...carried, id: e.exerciseId, sets, target: old?.target ?? null }
-    entry.topW = bestWeight(entry, assisted(e.exerciseId)) || null
-    if (e.routineId) entry.rid = e.routineId
-    if (e.superset) {
-      if (!groups.has(e.superset)) groups.set(e.superset, typeof old?.sg === 'string' ? old.sg : newId('sg', now))
-      entry.sg = groups.get(e.superset)
-    }
-    const note = e.note?.trim()
-    if (note) entry.note = note
-    return entry
+/** Superset ids that no longer pair adjacent exercises are dropped, as the app does. */
+function cleanupSupersets(items: Entry[]): void {
+  items.forEach((e, i) => {
+    if (!e.sg) return
+    if (!(items[i - 1]?.sg === e.sg || items[i + 1]?.sg === e.sg)) delete e.sg
   })
+}
+
+interface EntryContext {
+  routineIds: string[]
+  routines: Entry[]
+  assisted: AssistedCheck
+  now: number
+}
+
+/** The routine an exercise came from on a combined day: the first of the session's routines that plans it. */
+function inferRid(exerciseId: string, c: EntryContext): string | undefined {
+  if (c.routineIds.length < 2) return undefined
+  return c.routineIds.find((rid) => listOf(c.routines.find((r) => r.id === rid), 'ex').some((x) => x.id === exerciseId))
+}
+
+/** Sessions of a routine marked excludeFromProgression (a deload) do not count for progression, as in the app. */
+function excluded(entry: Entry, c: EntryContext): boolean {
+  const rid = typeof entry.rid === 'string' ? entry.rid : c.routineIds.length === 1 ? c.routineIds[0] : undefined
+  return rid !== undefined && c.routines.find((r) => r.id === rid)?.excludeFromProgression === true
+}
+
+/**
+ * The workout's exercises: input order; an exercise the workout had (matched by id, in order) keeps
+ * what is not given, a new one is built from the input. Returns the entries or why not.
+ */
+function buildEntries(inputs: EntryInput[], existing: Entry[], c: EntryContext): Entry[] | string {
+  const pool = new Map<string, Entry[]>()
+  for (const e of existing) pool.set(String(e.id), [...(pool.get(String(e.id)) ?? []), e])
+  const oldGroups = new Set(existing.map((e) => e.sg).filter((g): g is string => typeof g === 'string'))
+  const groups = new Map<string, string>()
+  const out: Entry[] = []
+  for (const [i, x] of inputs.entries()) {
+    const old = pool.get(x.exerciseId)?.shift()
+    if (!old && !x.sets) return `exercise ${i + 1} (${x.exerciseId}) is new to this workout and needs its sets`
+    const e: Entry = old ? structuredClone(old) : { id: x.exerciseId, target: null }
+    if (x.sets) e.sets = x.sets.map(storedSet)
+    if (x.note !== undefined) {
+      const note = x.note?.trim()
+      if (note) e.note = note
+      else {
+        delete e.note
+        delete e.notePin
+      }
+    }
+    if (x.superset === null) delete e.sg
+    else if (x.superset) {
+      if (!groups.has(x.superset)) {
+        const used = new Set(groups.values())
+        let id = oldGroups.has(x.superset) && !used.has(x.superset) ? x.superset : newId('sg', c.now)
+        while (used.has(id)) id = newId('sg', c.now + used.size)
+        groups.set(x.superset, id)
+      }
+      e.sg = groups.get(x.superset)
+    }
+    if (x.routineId === null) delete e.rid
+    else if (x.routineId !== undefined) {
+      if (!c.routineIds.includes(x.routineId)) return `exercise ${i + 1}: routine "${x.routineId}" is not one of this session's routines (${c.routineIds.join(', ') || 'none'})`
+      e.rid = x.routineId
+    } else if (!old) {
+      const rid = inferRid(x.exerciseId, c)
+      if (rid) e.rid = rid
+    }
+    if (!old && excluded(e, c)) e.noProg = true
+    e.topW = bestWeight(e, c.assisted(x.exerciseId)) || null
+    out.push(e)
+  }
+  cleanupSupersets(out)
+  return out
 }
 
 /** Local time on a day: `HH:MM`, as ms since epoch. */
@@ -150,30 +187,28 @@ const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be HH:MM')
 interface Checks {
   names: ExerciseIndex
   assisted: AssistedCheck
-  unknown: (ids: string[]) => string | undefined
+  /** Unknown ids among `ids`; `allowed` are ids the workout already holds (a deleted custom exercise stays editable). */
+  unknown: (ids: string[], allowed?: Set<string>) => string | undefined
 }
 
 async function checks(ctx: ToolContext): Promise<(state: State) => Checks> {
   const builtin = await ctx.builtinExercises()
   return (state) => {
     const index = new ExerciseIndex(builtin, state)
-    const custom = new Set(customExercises(state).map((c) => c.id))
     return {
       names: index,
       assisted: (id) => index.assisted(id),
-      unknown: (ids) => {
-        const missing = ids.filter((id) => !builtin.exercises.has(id) && !custom.has(id) && !(builtin.error && !id.startsWith('c')))
+      unknown: (ids, allowed = new Set()) => {
+        const missing = ids.filter((id) => !index.get(id) && !allowed.has(id) && !(builtin.error && /^\d{4}$/.test(id)))
         return missing.length ? `unknown exercise ids: ${[...new Set(missing)].join(', ')}; find ids with read_exercises` : undefined
       },
     }
   }
 }
 
-function lastWeighIn(state: State, date: string): number | undefined {
-  const w = listOf(state, 'bodyweight')
-    .filter((e) => typeof e.d === 'string' && e.d <= date && typeof e.w === 'number')
-    .sort((a, b) => String(a.d).localeCompare(String(b.d)))
-    .at(-1)
+/** The body weight the app records with a session: that day's weigh-in, if there is one. */
+function weighInOn(state: State, date: string): number | undefined {
+  const w = listOf(state, 'bodyweight').find((e) => e.d === date && typeof e.w === 'number')
   return w ? Number(w.w) : undefined
 }
 
@@ -183,31 +218,36 @@ function summary(w: Entry, state: State, names: ExerciseIndex) {
     id: w.id,
     date: w.d,
     name: w.name,
-    exercises: entriesOf(w).map((e) => names.name(String(e.id))),
+    exercises: entriesOf(w).map((e) => names.get(String(e.id))?.name ?? (typeof e.n === 'string' ? e.n : String(e.id))),
     volume: Math.round(Number(w.vol) * 100) / 100,
     unit: unitOf(state),
     ...(Array.isArray(w.prs) && w.prs.length ? { prs: w.prs.map((id: unknown) => names.name(String(id))) } : {}),
   }
 }
 
+const notInFuture = (date: string, now: number) => (date > today(now) ? `${date} is in the future; only training that happened is logged` : undefined)
+const withoutStamp = (w: Entry) => JSON.stringify({ ...w, _ts: undefined })
+
 export const writeLogWorkout = defineTool({
   name: 'write_log_workout',
   description:
-    'Log a finished workout. Sets: weight + reps (done defaults to true), warmup, rir or rpe, a drop set (drops), rest-pause (clusters; reps is the total), per side (left and right), timed (sec, optional weight) or cardio (min, speed in km/h). Weights in the profile unit. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. Without a start time, today ends now and other days start at 18:00.',
+    'Log a finished workout. Sets: weight + reps (done defaults to true), warmup, rir or rpe, a drop set (drops), rest-pause (clusters; reps is the total), per side (left and right), timed (sec, optional weight) or cardio (min, speed in km/h). Weights in the profile unit. Every exercise needs at least one completed set. On a combined day (several routineIds) each exercise is linked to its routine, inferred when not given; sessions of a routine excluded from progression are marked so. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. Without a start time, today ends now and other days start at 18:00. No future dates.',
   input: {
     date: isoDate.optional().describe('Default today'),
     start: time.optional().describe('Local start time HH:MM'),
     durationMin: z.number().int().min(1).max(600).optional().describe('Default 60'),
-    routineIds: z.array(entryId).max(5).optional().describe('The routine(s) this session followed; several make a combined day'),
-    name: z.string().trim().min(1).max(80).optional().describe('Default the routine name(s), else "Workout"'),
-    note: z.string().max(1000).optional(),
-    bodyWeight: z.number().positive().max(1000).optional().describe('Default the latest weigh-in up to that day'),
+    routineIds: z.array(entryId).max(10).optional().describe('The routine(s) this session followed; several make a combined day'),
+    name: z.string().trim().min(1).max(80).optional().describe('Default the routine name(s) as the app joins them, else "Freestyle"'),
+    note: z.string().max(500).optional(),
+    bodyWeight: z.number().positive().max(1000).optional().describe("Default that day's weigh-in, if any"),
     entries: z.array(entryInput).min(1).max(40),
   },
   async handler(args, ctx) {
-    const problems = setProblems(args.entries)
+    const problems = setProblems(args.entries, true)
     if (problems.length) return invalid(problems.join('; '))
     const date = args.date ?? today()
+    const future = notInFuture(date, Date.now())
+    if (future) return invalid(future)
     const duration = (args.durationMin ?? 60) * 60_000
     const makeChecks = await checks(ctx)
     return change(
@@ -217,22 +257,27 @@ export const writeLogWorkout = defineTool({
         const c = makeChecks(draft)
         const unknown = c.unknown(args.entries.map((e) => e.exerciseId))
         if (unknown) return refuse(unknown)
-        const routines = args.routineIds ?? []
-        const missing = [...routines, ...args.entries.flatMap((e) => (e.routineId ? [e.routineId] : []))].filter((id) => !listOf(draft, 'routines').some((r) => r.id === id))
-        if (missing.length) return refuse(`no routine with id ${[...new Set(missing)].map((m) => `"${m}"`).join(', ')}`)
+        const routineIds = [...new Set(args.routineIds ?? [])]
+        const routines = listOf(draft, 'routines')
+        const missing = routineIds.filter((id) => !routines.some((r) => r.id === id))
+        if (missing.length) return refuse(`no routine with id ${missing.map((m) => `"${m}"`).join(', ')}`)
+        const entries = buildEntries(args.entries, [], { routineIds, routines, assisted: c.assisted, now })
+        if (typeof entries === 'string') return refuse(entries)
         const start = args.start ? at(date, args.start) : date === today(now) ? now - duration : at(date, '18:00')
-        const bw = args.bodyWeight ?? lastWeighIn(draft, date)
+        const bw = args.bodyWeight ?? weighInOn(draft, date)
+        const allExcluded = entries.length > 0 && entries.every((e) => e.noProg === true)
         const workout: Entry = {
           id: newId('', now),
           d: date,
           start,
           end: start + duration,
-          routineIds: routines,
-          routineId: routines[0] ?? null,
-          name: args.name ?? (routines.length ? routines.map((id) => routineName(draft, id)).join(' + ') : 'Workout'),
+          routineIds,
+          routineId: routineIds[0] ?? null,
+          name: args.name ?? sessionName(routineIds.map((id) => routineName(draft, id))),
           ...(bw !== undefined ? { bw } : {}),
-          entries: storedEntries(args.entries, [], c.assisted, now),
+          entries,
           prs: [],
+          ...(allExcluded ? { excludeFromProgression: true } : {}),
           ...(args.note?.trim() ? { note: args.note.trim() } : {}),
         }
         workout.vol = workoutVolume(workout)
@@ -254,22 +299,26 @@ export const writeLogWorkout = defineTool({
 export const writeUpdateWorkout = defineTool({
   name: 'write_update_workout',
   description:
-    'Change a logged workout: its date, start time, duration, name, note, body weight, or its exercises and sets (`entries` replaces them all; same set format as write_log_workout). Volume, best weights and PR badges are worked out again as the app does after an edit; a remembered working weight that came from a removed set falls back to the best left in history.',
+    'Change a logged workout: its date, start time, duration, name, note, body weight, or its exercises. `entries`, when given, is the new list in the format read_workout returns: an exercise the workout had keeps what is left out (its sets, note, superset, routine; null removes a note, superset or routine), a new one needs its sets. Volume, best weights and PR badges are worked out again as the app does after an edit; a remembered working weight that came from a removed set falls back to the best left in history. No future dates.',
   input: {
     id: entryId,
     date: isoDate.optional(),
     start: time.optional(),
     durationMin: z.number().int().min(1).max(600).optional(),
     name: z.string().trim().min(1).max(80).optional(),
-    note: z.string().max(1000).optional().describe('Empty removes the note'),
+    note: z.string().max(500).optional().describe('Empty removes the note'),
     bodyWeight: z.number().positive().max(1000).nullable().optional().describe('null removes it'),
     entries: z.array(entryInput).min(1).max(40).optional(),
   },
   async handler(args, ctx) {
     const { id, ...fields } = args
     if (Object.values(fields).every((v) => v === undefined)) return invalid('nothing to change')
-    const problems = setProblems(args.entries ?? [])
+    const problems = setProblems(args.entries ?? [], false)
     if (problems.length) return invalid(problems.join('; '))
+    if (args.date) {
+      const future = notInFuture(args.date, Date.now())
+      if (future) return invalid(future)
+    }
     const makeChecks = await checks(ctx)
     return change(
       ctx,
@@ -281,7 +330,7 @@ export const writeUpdateWorkout = defineTool({
         if (i < 0) return refuse(`no workout with id "${id}"; find ids with read_workouts`)
         const before = list[i] as Entry
         if (args.entries) {
-          const unknown = c.unknown(args.entries.map((e) => e.exerciseId))
+          const unknown = c.unknown(args.entries.map((e) => e.exerciseId), new Set(entriesOf(before).map((e) => String(e.id))))
           if (unknown) return refuse(unknown)
         }
         const record: Entry = structuredClone(before)
@@ -306,8 +355,14 @@ export const writeUpdateWorkout = defineTool({
           if (args.bodyWeight === null) delete record.bw
           else record.bw = args.bodyWeight
         }
-        if (args.entries) record.entries = storedEntries(args.entries, entriesOf(before), c.assisted, now)
+        if (args.entries) {
+          const entries = buildEntries(args.entries, entriesOf(before), { routineIds: routineIdsOf(before), routines: listOf(draft, 'routines'), assisted: c.assisted, now })
+          if (typeof entries === 'string') return refuse(entries)
+          record.entries = entries
+        }
         record.vol = workoutVolume(record)
+        // An unchanged workout is not stamped: the stamp would outrank an unsynced edit made elsewhere.
+        if (withoutStamp(record) === withoutStamp(before)) return apply({ stamp: before._ts, shown: summary(before, draft, c.names) })
         record._ts = now
         list[i] = record
         const touched = new Set([...entriesOf(before), ...entriesOf(record)].map((e) => String(e.id)))

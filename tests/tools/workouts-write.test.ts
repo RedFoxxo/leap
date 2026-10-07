@@ -58,7 +58,6 @@ describe('write_log_workout', () => {
       routineIds: [LEGS],
       routineId: LEGS,
       name: 'Leg Day',
-      bw: 78.4,
       note: 'Heavy day',
       vol: 3436,
       _ts: NOW,
@@ -98,11 +97,11 @@ describe('write_log_workout', () => {
       durationMin: 45,
       entries: [{ exerciseId: '0043', sets: [{ weight: 110, reps: 3 }] }],
     })
-    expect(r.json.logged).toMatchObject({ name: 'Workout', prs: ['barbell full squat'] })
+    expect(r.json.logged).toMatchObject({ name: 'Freestyle', prs: ['barbell full squat'] })
     expect(doc().workouts.map((w: { d: string }) => w.d)).toEqual(['2026-09-29', '2026-09-30', '2026-10-05'])
     const logged = doc().workouts[0]
     expect(logged).toMatchObject({ start: new Date('2026-09-29T17:30:00').getTime(), end: new Date('2026-09-29T18:15:00').getTime(), routineIds: [], routineId: null })
-    expect(logged.bw).toBe(79)
+    expect(logged).not.toHaveProperty('bw')
     expect(workout('w-legs').prs).toEqual([])
     expect(workout('w-push').prs).toEqual(['0025'])
     expect(r.json).not.toHaveProperty('rememberedWeightRaised')
@@ -172,7 +171,7 @@ describe('write_update_workout', () => {
     const w = workout('w-push')
     expect(w).toMatchObject({ vol: 1280, _ts: NOW, note: 'Felt strong', bw: 78.4, routineIds: [PUSH, LEGS] })
     expect(w.media).toHaveLength(1)
-    expect(w.entries[0]).toEqual({ id: '0025', sets: [{ w: 80, r: 8, done: true }, { w: 80, r: 8, done: true }], target: null, topW: 80, note: 'paused' })
+    expect(w.entries[0]).toEqual({ id: '0025', rid: PUSH, sets: [{ w: 80, r: 8, done: true }, { w: 80, r: 8, done: true }], topW: 80, note: 'paused' })
     expect(doc().exWeights['0025']).toEqual({ w: 80, d: '2026-10-05' })
     await h.close()
   })
@@ -205,6 +204,108 @@ describe('write_update_workout', () => {
     expect((await h.call('write_update_workout', { id: 'w-push' })).text).toMatch(/nothing to change/)
     expect((await h.call('write_update_workout', { id: 'nope', name: 'x' })).text).toMatch(/no workout with id "nope"/)
     expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+})
+
+describe('workout edits keep what is not mentioned', () => {
+  it('takes back what read_workout returns, and writes nothing when nothing changed', async () => {
+    const { h, fake } = await setup()
+    const read = await h.call('read_workout', { id: 'w-push' })
+    const r = await h.call('write_update_workout', { id: 'w-push', entries: read.json.entries })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.json).toMatchObject({ saved: false, unchanged: true })
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('changes one exercise and keeps the others’ sets, notes, supersets, routines and app fields', async () => {
+    const state = profile()
+    ;(state.workouts as any[])[1].entries[1].muscleSnapshot = { n: 'kept' }
+    const { h, workout } = await setup(state)
+    const before = structuredClone((state.workouts as any[])[1])
+    await h.call('write_update_workout', { id: 'w-push', entries: [{ exerciseId: '0294' }, { exerciseId: 'cplank', sets: [{ sec: 90, weight: 10 }] }] })
+    const w = workout('w-push')
+    expect(w.entries.map((e: { id: string }) => e.id)).toEqual(['0294', 'cplank'])
+    // Everything of the curl is kept; only its superset id goes, since its partner (the bench press) left the workout.
+    const { sg: _sg, ...curl } = before.entries[1]
+    expect(w.entries[0]).toEqual(curl)
+    expect(w.entries[1]).toMatchObject({ id: 'cplank', rid: LEGS, sets: [{ sec: 90, w: 10, done: true }] })
+    await h.close()
+  })
+
+  it('removes a note, superset or routine link with null', async () => {
+    const { h, workout } = await setup()
+    await h.call('write_update_workout', { id: 'w-push', entries: [{ exerciseId: '0025', note: null, routineId: null }, { exerciseId: '0294', superset: null }, { exerciseId: 'cplank' }] })
+    const w = workout('w-push')
+    expect(w.entries[0]).not.toHaveProperty('note')
+    expect(w.entries[0]).not.toHaveProperty('rid')
+    expect(w.entries[1]).not.toHaveProperty('sg')
+    await h.close()
+  })
+
+  it('keeps a deleted custom exercise editable', async () => {
+    const state = profile()
+    state.customEx = []
+    const { h, workout } = await setup(state)
+    const r = await h.call('write_update_workout', { id: 'w-push', entries: [{ exerciseId: '0025' }, { exerciseId: '0294' }, { exerciseId: 'cplank', sets: [{ sec: 45, weight: 0 }] }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(workout('w-push').entries[2].sets).toEqual([{ sec: 45, w: 0, done: true }])
+    await h.close()
+  })
+})
+
+describe('combined days and deloads', () => {
+  it('links each exercise to its routine, inferred or given, and checks it belongs to the session', async () => {
+    const { h, doc } = await setup()
+    const r = await h.call('write_log_workout', {
+      date: '2026-10-06',
+      routineIds: [PUSH, LEGS, PUSH],
+      entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5 }] }, { exerciseId: '0025', sets: [{ weight: 80, reps: 5 }] }, { exerciseId: '0032', routineId: LEGS, sets: [{ weight: 140, reps: 3 }] }],
+    })
+    expect(r.json.logged.name).toBe('Push Day + Leg Day')
+    const w = doc().workouts.find((x: { d: string }) => x.d === '2026-10-06')
+    expect(w.routineIds).toEqual([PUSH, LEGS])
+    expect(w.entries.map((e: { rid?: string }) => e.rid)).toEqual([LEGS, PUSH, LEGS])
+    const wrong = await h.call('write_log_workout', { date: '2026-10-06', routineIds: [PUSH, LEGS], entries: [{ exerciseId: '0032', routineId: 'r-pull', sets: [{ weight: 1, reps: 1 }] }] })
+    expect(wrong.text).toMatch(/not one of this session's routines/)
+    await h.close()
+  })
+
+  it('marks sessions of a routine excluded from progression', async () => {
+    const state = profile()
+    ;(state.routines as any[]).find((r) => r.id === LEGS).excludeFromProgression = true
+    const { h, doc } = await setup(state)
+    await h.call('write_log_workout', { date: '2026-10-06', routineIds: [LEGS], entries: [{ exerciseId: '0043', sets: [{ weight: 60, reps: 5 }] }] })
+    const w = doc().workouts.find((x: { d: string }) => x.d === '2026-10-06')
+    expect(w.entries[0].noProg).toBe(true)
+    expect(w.excludeFromProgression).toBe(true)
+    await h.close()
+  })
+})
+
+describe('workout input the app would not store', () => {
+  it('is refused before anything is sent', async () => {
+    const { h, fake } = await setup()
+    const one = (sets: unknown[]) => ({ entries: [{ exerciseId: '0043', sets }] })
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ date: '2026-10-08', ...one([{ weight: 1, reps: 1 }]) }, /in the future/],
+      [one([{ weight: 100, reps: 5, done: false }]), /no completed set/],
+      [one([{ left: { weight: 10, reps: 5 }, right: { weight: 10, reps: 5 }, drops: [{ weight: 5, reps: 5 }] }]), /not logged on per-side sets/],
+      [{ note: 'x'.repeat(501), ...one([{ weight: 1, reps: 1 }]) }, /./],
+    ]
+    for (const [args, message] of cases) expect((await h.call('write_log_workout', args)).text, JSON.stringify(args).slice(0, 80)).toMatch(message)
+    expect((await h.call('write_update_workout', { id: 'w-push', date: '2026-12-01' })).text).toMatch(/in the future/)
+    expect(fake.stub.calls).toHaveLength(0)
+    await h.close()
+  })
+
+  it('names a session of four routines as the app does', async () => {
+    const state = profile()
+    ;(state.routines as any[]).push({ id: 'r4', name: 'Core', ex: [] })
+    const { h } = await setup(state)
+    const r = await h.call('write_log_workout', { date: '2026-10-06', routineIds: [PUSH, LEGS, 'r-pull', 'r4'], entries: [{ exerciseId: '0043', sets: [{ weight: 1, reps: 1 }] }] })
+    expect(r.json.logged.name).toBe('Push Day + Leg Day + 2 more')
     await h.close()
   })
 })

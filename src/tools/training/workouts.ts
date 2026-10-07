@@ -45,7 +45,7 @@ export const readWorkouts = defineTool({
 export const readWorkout = defineTool({
   name: 'read_workout',
   description:
-    'One workout set by set, by `id` or by `date`. Each set shows weight, reps, done, RIR/RPE, warm-ups (kind: warmup), drop sets (drops), rest-pause (clusters, r is the total), per-side rows (sides L/R), timed (sec) and cardio (min, speed in km/h). A date with several workouts returns their ids to choose from.',
+    'One workout set by set, by `id` or by `date`, in the format write_update_workout takes back: each exercise with exerciseId, sets (weight, reps, done, rir/rpe, warmup, drops for a drop set, clusters for rest-pause where reps is the total, left/right for a per-side set, sec for timed, min and speed in km/h for cardio), note, superset, routineId; plus name, volume and bestWeight for reading, and `other` for fields openGym keeps that leap leaves alone. A date with several workouts returns their ids to choose from.',
   input: { id: entryId.optional(), date: isoDate.optional() },
   async handler(args, ctx) {
     if (!args.id === !args.date) return invalid('give exactly one of id or date')
@@ -60,6 +60,7 @@ export const readWorkout = defineTool({
     if (found.length > 1 && args.date) {
       return success({
         date: args.date,
+        unit: unitOf(state),
         choose: 'Several workouts on this day; read one by id',
         workouts: found.map((w) => workoutSummary(w, state, exercises)),
       })

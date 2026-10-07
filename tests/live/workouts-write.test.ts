@@ -21,7 +21,7 @@ describe.runIf(LIVE)('workout writes (live)', () => {
     expect(logged.json.logged).toMatchObject({ volume: 1850, prs: ['barbell full squat'] })
 
     const read = await c.call('read_workout', { id })
-    expect(read.json.entries[0].sets[2]).toMatchObject({ type: 'dropset', drops: [{ w: 80, r: 6 }] })
+    expect(read.json.entries[0].sets[2]).toMatchObject({ drops: [{ weight: 80, reps: 6 }] })
 
     const updated = await c.call('write_update_workout', { id, note: 'live edit', entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5 }] }] })
     expect(updated.json.updated).toMatchObject({ volume: 500 })

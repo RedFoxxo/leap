@@ -4,7 +4,6 @@ import { routineName } from '../../domain/plan.js'
 import {
   bestWeight,
   completedVolume,
-  describeSet,
   doneUnits,
   entriesOf,
   entryRoutineId,
@@ -15,6 +14,7 @@ import {
   workoutVolume,
 } from '../../domain/sets.js'
 import { isRecord, type Entry, type State } from '../../state/types.js'
+import { MANAGED_ENTRY_KEYS, setForTools } from '../../domain/workout-items.js'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -91,18 +91,19 @@ export function workoutDetail(workout: Entry, state: State | null, exercises: Ex
   summary.entries = entriesOf(workout).map((e, i) => {
     const id = String(e.id)
     const sets = setsOf(e)
-    const out: Entry = { position: i + 1, id, name: entryName(exercises, e) }
-    const rid = entryRoutineId(workout, e)
-    if (rid && routineIdsOf(workout).length > 1) out.routine = { id: rid, name: routineName(state, rid) }
+    // The format write_update_workout takes back as it is; position, name, routineName, volume and bestWeight are for reading.
+    const out: Entry = { position: i + 1, name: entryName(exercises, e), exerciseId: id, sets: sets.map(setForTools) }
+    const note = str(e.note)
+    if (note) out.note = note
     if (str(e.sg)) out.superset = e.sg
-    out.sets = sets.map(describeSet)
+    if (typeof e.rid === 'string' && e.rid) out.routineId = e.rid
+    const rid = entryRoutineId(workout, e)
+    if (rid && routineIdsOf(workout).length > 1) out.routineName = routineName(state, rid)
     out.volume = round(sets.filter((s) => !isWarmup(s)).reduce((v, s) => v + completedVolume(s), 0))
     const best = bestWeight(e, isAssisted(exercises, id))
     if (best > 0) out.bestWeight = best
-    if (isRecord(e.target)) out.target = e.target
-    const note = str(e.note)
-    if (note) out.note = note
-    if (e.noProg === true) out.excludeFromProgression = true
+    const other = Object.fromEntries(Object.entries(e).filter(([k]) => !MANAGED_ENTRY_KEYS.has(k) && e[k] !== null))
+    if (Object.keys(other).length) out.other = other
     return out
   })
   if (Array.isArray(workout.media)) {

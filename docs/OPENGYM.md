@@ -153,6 +153,24 @@ Derived when a workout is finished:
 
 `workouts` must stay sorted by `d`, then `start`: "last time" reads from the end.
 
+What the app does when a session is saved, and leap with it (**source**:
+`lib/session-merge.js`, `lib/session-start.js`, `lib/finish-workout.js`,
+`lib/session-edit.js`, `sheets.jsx` finish and past-log flows):
+
+- Every entry of a combined session carries `rid`, the routine it came from;
+  without it the entry counts for `routineIds[0]`. `routineIds` has no
+  duplicates.
+- Entries from a routine with `excludeFromProgression` get `noProg: true`;
+  when all do, the workout gets `excludeFromProgression: true`.
+- Only exercises with a completed set are kept. The name is the routines'
+  names joined ("A + B", from four on "A + B + N more"), else "Freestyle".
+  `bw` is that session's weigh-in, if any. Notes are at most 500 characters.
+  Past logs and moves never go beyond today.
+- On a per-side set, drop sets and rest-pause live on each side; leap does not
+  log them there.
+- An edit replaces the record by id, keeps the entry fields it does not edit,
+  and is skipped (no stamp) when nothing changed.
+
 A workout from a combined day carries `routineIds` (all of them; `routineId`
 is the first) and a `rid` on each entry; an entry without `rid` in a workout
 where others have one belongs to no routine. A finished entry may also carry

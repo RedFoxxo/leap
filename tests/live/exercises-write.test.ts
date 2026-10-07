@@ -28,7 +28,7 @@ describe.runIf(LIVE)('custom exercise writes (live)', () => {
     const deleted = await c.call('delete_custom_exercise', { id })
     expect(deleted.json).toMatchObject({ workoutsKeepingIt: 1 })
     const history = await c.call('read_workout', { id: logged.json.logged.id })
-    expect(history.json.entries[0]).toMatchObject({ name: 'Live landmine press (kneeling)', sets: [{ n: 1, w: 40, r: 10, done: true }] })
+    expect(history.json.entries[0]).toMatchObject({ name: 'Live landmine press (kneeling)', sets: [{ weight: 40, reps: 10, done: true }] })
     await c.close()
   })
 })
