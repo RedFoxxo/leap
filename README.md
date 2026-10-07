@@ -92,11 +92,11 @@ Keep the token out of config files: export it in your shell profile
 `read_training_summary`, `read_muscle_balance`, `read_exercises`, `read_exercise`,
 `read_me`, `read_instance`, `read_document`
 
-**write**: `write_routine`, `write_copy_routine`, `write_week_plan`,
+**write**: `write_log_workout`, `write_update_workout`, `write_routine`, `write_copy_routine`, `write_week_plan`,
 `write_day_plan`, `write_bodyweight`, `write_goal_weight`, `write_settings`,
 `write_exercise_note`, `write_favourite`, `write_document`
 
-**delete**: `delete_routine`, `delete_bodyweight`
+**delete**: `delete_workout`, `delete_routine`, `delete_bodyweight`
 
 More tools are on the way; see [CLAUDE.md](CLAUDE.md) for the plan.
 

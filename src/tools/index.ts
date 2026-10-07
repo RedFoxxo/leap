@@ -7,6 +7,7 @@ import { statsReadTools } from './stats/read.js'
 import { planReadTools } from './training/plan.js'
 import { workoutReadTools } from './training/workouts.js'
 import type { ToolDef } from './types.js'
+import { workoutDeleteTools, workoutWriteTools } from './workouts/write.js'
 
 export type AnyToolDef = ToolDef<any>
 
@@ -19,8 +20,10 @@ export function allTools(): AnyToolDef[] {
     ...statsReadTools,
     ...exerciseReadTools,
     ...accountReadTools,
+    ...workoutWriteTools,
     ...routineWriteTools,
     ...settingsWriteTools,
+    ...workoutDeleteTools,
     ...routineDeleteTools,
     ...settingsDeleteTools,
   ]

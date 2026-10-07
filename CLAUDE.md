@@ -85,6 +85,7 @@ src/
                        rows, modes; volume, completed reps, best weight, entry routine
     plan.ts            weekday plan (list or legacy single id), date overrides, routine lookup
     dates.ts           local calendar days (`YYYY-MM-DD`), weekdays
+    workouts.ts        sorting, PR badge rebuild, remembered-weight raise/lower (the app's rules)
     stats.ts           1RM formulas and best set, PR rule (beatsWeight), exercise sessions,
                        muscle loads (dataset muscles, synonyms mapped to target names)
   state/
@@ -104,6 +105,8 @@ src/
     settings/          write_bodyweight, delete_bodyweight, write_goal_weight, write_settings
                        (known settings, validated; never the unit), write_exercise_note,
                        write_favourite, write_document (raw escape hatch, protected keys refused)
+    workouts/          write_log_workout, write_update_workout, delete_workout (volume, topW,
+                       PR badges and exWeights as the app sets them)
     routines/          write_routine (exercise list replaced; unmanaged item fields carried over
                        per exercise; superset labels → sg ids), write_copy_routine,
                        delete_routine (also off weekdays and dates, as the app does),
@@ -188,13 +191,10 @@ reads: workouts, routines, week plan, body weight (verified live; volume and
 best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
 profile), `read_profile`, `read_settings`, `read_document`, stats (PRs match
 openGym's on the demo profile), body weight, goal, settings, notes,
-favourites and the raw write, routines and the plan (verified live).
+favourites and the raw write, routines and the plan, workouts (verified live
+and against openGym's own code).
 
 Planned, in order:
 
-1. Write and delete tools for workouts and custom exercises. Logging or
-   editing a
-   workout must set `vol`, `topW` and `prs` the way the app does, and rebuild
-   later sessions' PR badges when history changes (`rebuildPrHistory`, see
-   docs/OPENGYM.md "Stats").
+1. Custom exercises (create, edit, delete).
 2. Media, Coach, account, admin.

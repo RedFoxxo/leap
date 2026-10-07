@@ -35,3 +35,11 @@ MCP clients in the server handshake.
   supersets, timed and cardio work, warm-ups, progression and intensifiers),
   `write_copy_routine`, `delete_routine` (also taken off the plan, as in the
   app), `write_week_plan` and `write_day_plan`.
+- Workouts: `write_log_workout` (every set kind; today or back-dated),
+  `write_update_workout` and `delete_workout`. Volume, best weights, PR badges
+  and the remembered working weight follow the app's rules; checked with
+  openGym's own code on workouts leap wrote.
+- Fixed: assistance machines (where less weight is better) are now recognised
+  as openGym recognises them, a leverage machine named "assisted" or a custom
+  exercise marked so; before, 15 exercises with the dataset's "assisted"
+  equipment were treated that way by mistake.

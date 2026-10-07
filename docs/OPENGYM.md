@@ -212,6 +212,23 @@ differ from the app's.
   `workout-date.js` `rebuildPrHistory`). **Verified**: leap marks the same PRs
   as openGym on 30 of the demo profile's 33 workouts; the 3 others are its
   first week, where the demo generator deliberately stores no badges.
+- Assistance machine (**source**: `exercises.js` `isAssisted`): an explicit
+  `assisted` boolean on a custom exercise wins; otherwise equipment
+  `leverage machine` and a name matching `assist(ed)` — 8 catalogue exercises.
+  The dataset's equipment `assisted` (15 exercises: partner-assisted stretches
+  and the like) is ordinary load. **Verified** against the catalogue.
+- After logging into the past or editing a workout, the app rebuilds badges of
+  the touched exercises: walking history in order, a session keeps a badge only
+  while it leads every earlier one, and only the logged/edited session can gain
+  one (`workout-date.js` `rebuildPrHistory`). The remembered weight
+  (`exWeights`) is raised only by a session finished today, and lowered only
+  when an edit or delete took away the load it came from
+  (`session-edit.js` `lowerKeptWeights`). Deleting from the workout detail
+  rebuilds nothing.
+- **Verified** (2026-10-07): workouts logged and edited by leap on the test
+  server, checked with openGym's own `workoutVolume`, `bestWeightForEntry` and
+  `rebuildPrHistory`: every volume and best weight matches, and openGym's
+  rebuild leaves every badge leap wrote unchanged.
 - Muscle balance: done, non-warm-up sets per muscle; primary muscles count 1,
   secondary 0.4.
 
