@@ -71,11 +71,51 @@ src/
     core.ts            the one request function: Bearer token, User-Agent, stderr log, Result
     result.ts          Result<T> = { ok: true, status, data } | { ok: false, status, message, code?, retryAfter?, body }
     redact.ts          token redaction (configured token and every "token" field in bodies)
+  state/
+    types.ts           the loosely typed profile document, list/map accessors
+    store.ts           load, and update(): the one write path (see "Writing the profile")
+    backup.ts          pre-write backups
+    ids.ts             entry ids in the app's format
   tools/
     types.ts, context.ts, respond.ts, index.ts
     account/           read_me, read_instance
-tests/                 contract tests (tools/), helpers (fetch stub, MCP harness), live/ (OPENGYM_LIVE=1 only)
+docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
+scripts/test-server.mjs  throwaway openGym API in Docker for live tests
+tests/                 contract tests (tools/), helpers (fetch stub, MCP harness, stateful
+                       fake openGym), live/ (OPENGYM_LIVE=1 only)
 ```
+
+### Writing the profile
+
+openGym stores a profile as **one document** that `PUT /api/data` replaces
+whole, and the phone app merges copies by `_ts` stamps without tombstones. Read
+`docs/OPENGYM.md` before writing a tool that changes it. Every write goes
+through `StateStore.update(mutate, { verify })`:
+
+1. Load the document and its `rev`.
+2. `mutate(draft, { now })` changes a private copy, or refuses (nothing is sent).
+   It is called again on the fresh document after a conflict, so it must decide
+   from `draft` alone. Stamp what it changes with `now` (`_ts`; `t` on weigh-ins).
+3. The store sets the top-level `_ts` (always moving forward), drops `_rev` and
+   `active`, and refuses a document leap must never send: a list or map key
+   holding anything else, a changed `unit`/`unitSet` (unless `allowUnitChange`),
+   changed `resetAt`/`resetIds`/`coach`, an empty document, or one over 5 MiB.
+4. Back up the current document (owner-only files, newest 50, under
+   `$XDG_STATE_HOME/leap/backups/<instance>`). No backup, no write.
+5. `PUT` with `baseRev`. On 409, reload and redo step 2 (up to 4 attempts). With
+   no response, reload: if the document carries this write's `_ts` it was
+   applied (never redo it), otherwise retry.
+6. Read back and run `verify`; report `notPersisted`, `retries`, `warnings`.
+
+Rules for mutate functions:
+
+- Change only what was asked. Keep every unknown key and field.
+- Never write `null` where the app's default is a list or map.
+- Weights are in the profile's `unit`; never convert silently.
+- Keep `workouts` sorted by `d`, then `start`; `bodyweight` one entry per day,
+  sorted by day.
+- Deleting cannot be guaranteed: a device with unsynced changes brings the
+  entry back on its next merge. Delete tools say so.
 
 ### HTTP layer
 
@@ -110,13 +150,13 @@ tests/                 contract tests (tools/), helpers (fetch stub, MCP harness
 
 ## Status and remaining work
 
-Done: scaffold, HTTP layer, pairing, `read_me`, `read_instance`.
+Done: scaffold, HTTP layer, pairing, `read_me`, `read_instance`, the state
+layer (verified live, including a real 409 from a second writer).
 
 Planned, in order:
 
-1. State layer: read the profile document, typed views of it, and the safe
-   write path (read-modify-write with `baseRev`, retry on 409, keep unknown
-   fields, read back to verify).
+1. Exercise names: built-in catalogue from the upstream MIT dataset at runtime
+   (cached), plus the profile's custom exercises.
 2. Read tools for training data and stats.
 3. Write and delete tools for training data and settings.
 4. Media, Coach, account, admin.

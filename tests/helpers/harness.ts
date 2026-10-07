@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { Config } from '../../src/config.js'
 import { createServer } from '../../src/server.js'
-import { createContext, type ToolContext } from '../../src/tools/context.js'
+import { createContext, type ContextOptions, type ToolContext } from '../../src/tools/context.js'
 import { FetchStub } from './fetch-stub.js'
 
 export const BASE = 'https://gym.example'
@@ -27,10 +27,12 @@ export interface Harness {
  * The real server, real client and real handlers, connected to an MCP client
  * over an in-memory transport. Only `fetch` is stubbed.
  */
-export async function harness(options: { stub?: FetchStub; config?: Partial<Config> } = {}): Promise<Harness> {
+export async function harness(
+  options: { stub?: FetchStub; config?: Partial<Config>; context?: Omit<ContextOptions, 'fetch'> } = {},
+): Promise<Harness> {
   const stub = options.stub ?? new FetchStub()
   const config: Config = { baseUrl: BASE, token: TOKEN, ...options.config }
-  const ctx = createContext(config, { fetch: stub.fetch })
+  const ctx = createContext(config, { backup: null, ...options.context, fetch: stub.fetch })
   const server = createServer(ctx)
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)
