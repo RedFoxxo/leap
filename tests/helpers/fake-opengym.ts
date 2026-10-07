@@ -18,6 +18,10 @@ export class FakeOpenGym {
   dropResponses = 0
   /** Fail the next N PUTs without applying them (network failure before the write). */
   failBeforeApply = 0
+  /** Accept the next N PUTs but answer 504, as a reverse proxy that gave up waiting does. */
+  gatewayAfterApply = 0
+  /** Runs right after a PUT was applied: simulate another device writing before leap re-reads. */
+  afterApply: ((fake: FakeOpenGym) => void) | undefined
 
   constructor(state: Record<string, unknown> | null = null, rev = state ? 1 : 0, stub = new FetchStub()) {
     this.state = state ? structuredClone(state) : null
@@ -60,6 +64,11 @@ export class FakeOpenGym {
     doc._rev = this.rev
     this.state = doc
     this.puts.push(structuredClone(doc))
+    this.afterApply?.(this)
+    if (this.gatewayAfterApply > 0) {
+      this.gatewayAfterApply--
+      return new StubReply(504, '<html><body>504 Gateway Time-out</body></html>')
+    }
     if (this.dropResponses > 0) {
       this.dropResponses--
       throw new TypeError('socket hang up')

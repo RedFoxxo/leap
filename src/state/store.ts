@@ -46,6 +46,8 @@ export interface Written<R> {
 /** openGym's body limit is 5 MiB. Stay clearly below it. */
 export const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024 - 64 * 1024
 const MAX_ATTEMPTS = 4
+/** Answers from a reverse proxy that cut the request short; openGym itself may have saved it. */
+const GATEWAY_ERRORS = new Set([502, 503, 504])
 
 /** A change refused before anything was sent; `code: "refused"`. */
 function refused(message: string): Err {
@@ -92,6 +94,8 @@ export class StateStore {
     let retries = 0
     let backup: string | undefined
     const warnings: string[] = []
+    /** Attempts whose outcome is unknown: they may have landed, possibly after a later read. */
+    const lost: { now: number; result: R }[] = []
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const { state: current, rev } = base.data
@@ -123,18 +127,23 @@ export class StateStore {
         return ok(await this.readBack(decided.result, put.data.rev, now, retries, backup, warnings, options), put.status)
       }
 
-      if (put.status === 409 || put.status === 0) {
+      // No answer, or a proxy in front of openGym that gave up: the write may still have been saved.
+      const unknown = put.status === 0 || GATEWAY_ERRORS.has(put.status)
+      if (unknown) lost.push({ now, result: decided.result })
+      if (put.status === 409 || unknown) {
         const fresh = await this.load()
         if (!fresh.ok) {
-          const what = put.status === 0 ? 'the write may or may not have been applied' : 'another device wrote first'
+          const what = lost.length ? 'the write may or may not have been applied' : 'another device wrote first'
           return err(fresh.status, `${what}, and re-reading the profile failed: ${fresh.message}`, fresh.body, fresh.request)
         }
-        // No response: the write may have landed. Its `_ts` marks it; redoing it would apply the change twice.
-        if (put.status === 0 && fresh.data.state?._ts === now) {
-          warnings.push('openGym did not answer the write, but the profile shows it was applied')
-          return ok(await this.readBack(decided.result, fresh.data.rev, now, retries, backup, warnings, options, fresh.data), 200)
+        // A lost attempt may have landed, even after an earlier re-read. Redoing it would apply the
+        // change twice (a second workout), so look for it: its `_ts`, or the change itself.
+        const landed = lost.find((a) => fresh.data.state?._ts === a.now || (options.verify !== undefined && options.verify(fresh.data.state ?? {}, a.result).length === 0))
+        if (landed) {
+          warnings.push('openGym did not confirm the write, but the profile shows it was applied')
+          return ok(await this.readBack(landed.result, fresh.data.rev, landed.now, retries, backup, warnings, options, fresh.data), 200)
         }
-        if (put.status === 0) warnings.push(`no answer to attempt ${attempt} (${put.message}); it was not applied and was retried`)
+        if (unknown) warnings.push(`no confirmation for attempt ${attempt} (${put.message}); the change is not in the profile, so it was retried`)
         else retries++
         base = fresh
         continue
@@ -143,6 +152,9 @@ export class StateStore {
       return put
     }
 
+    if (lost.length === MAX_ATTEMPTS) {
+      return err(0, `openGym did not confirm any of ${MAX_ATTEMPTS} attempts and the change is not in the profile; nothing of it was saved`)
+    }
     return err(409, `another device kept writing to the profile; gave up after ${MAX_ATTEMPTS} attempts, nothing of this change was saved`)
   }
 

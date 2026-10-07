@@ -98,13 +98,51 @@ describe('StateStore.update', () => {
     expect(r.ok && r.data.warnings.join()).toMatch(/profile shows it was applied/)
   })
 
+  /** A create with a fresh id per attempt, as write_log_workout does: a retry of a landed write duplicates it. */
+  const createWorkout = (draft: State, { now }: { now: number }) => {
+    const id = newId('', now)
+    writableList(draft, 'workouts').push({ id, d: '2026-10-07', start: now, entries: [], vol: 0 })
+    return apply(id)
+  }
+  const verifyCreated = { verify: (s: State, id: string) => ((s.workouts as { id: string }[]).some((w) => w.id === id) ? [] : [id]) }
+
+  it('does not apply a change twice when a proxy answered 504 although openGym saved it', async () => {
+    const fake = new FakeOpenGym(profile(), 2)
+    fake.gatewayAfterApply = 1
+    const r = await store(fake).update(createWorkout, verifyCreated)
+    expect(r.ok, !r.ok ? r.message : '').toBe(true)
+    expect(fake.puts).toHaveLength(1)
+    expect((fake.state!.workouts as unknown[]).length).toBe(2)
+  })
+
+  it('does not apply a change twice when another device wrote right after a lost response', async () => {
+    const fake = new FakeOpenGym(profile(), 2)
+    fake.dropResponses = 1
+    fake.afterApply = (f) => {
+      f.afterApply = undefined
+      f.otherDeviceWrites((s) => void (s._ts = (s._ts as number) + 1000))
+    }
+    const r = await store(fake).update(createWorkout, verifyCreated)
+    expect(r.ok, !r.ok ? r.message : '').toBe(true)
+    expect(fake.puts).toHaveLength(1)
+    expect((fake.state!.workouts as unknown[]).length).toBe(2)
+  })
+
+  it('says plainly when no attempt was confirmed and none landed', async () => {
+    const fake = new FakeOpenGym(profile(), 2)
+    fake.failBeforeApply = 4
+    const r = await store(fake).update(createWorkout, verifyCreated)
+    expect(!r.ok && r.message).toMatch(/did not confirm any of 4 attempts and the change is not in the profile/)
+    expect(fake.puts).toHaveLength(0)
+  })
+
   it('retries a write that failed before reaching openGym', async () => {
     const fake = new FakeOpenGym(profile(), 2)
     fake.failBeforeApply = 1
     const r = await store(fake).update(addWeighIn)
     expect(r.ok).toBe(true)
     expect(fake.puts).toHaveLength(1)
-    expect(r.ok && r.data.warnings.join()).toMatch(/was not applied and was retried/)
+    expect(r.ok && r.data.warnings.join()).toMatch(/the change is not in the profile, so it was retried/)
   })
 
   it('sends nothing when the change is refused', async () => {
