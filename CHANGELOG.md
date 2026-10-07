@@ -31,3 +31,7 @@ MCP clients in the server handshake.
   `write_settings`, `write_exercise_note`, `write_favourite`, and
   `write_document` for settings no dedicated tool covers. Every write reports
   the new revision, conflicts it redid, and anything that did not persist.
+- Routines and the plan: `write_routine` (create or change, with rep ranges,
+  supersets, timed and cardio work, warm-ups, progression and intensifiers),
+  `write_copy_routine`, `delete_routine` (also taken off the plan, as in the
+  app), `write_week_plan` and `write_day_plan`.

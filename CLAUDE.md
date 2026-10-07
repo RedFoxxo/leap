@@ -104,6 +104,10 @@ src/
     settings/          write_bodyweight, delete_bodyweight, write_goal_weight, write_settings
                        (known settings, validated; never the unit), write_exercise_note,
                        write_favourite, write_document (raw escape hatch, protected keys refused)
+    routines/          write_routine (exercise list replaced; unmanaged item fields carried over
+                       per exercise; superset labels → sg ids), write_copy_routine,
+                       delete_routine (also off weekdays and dates, as the app does),
+                       write_week_plan, write_day_plan
     write.ts           change(): runs a mutation through the store and reports it the same way
                        for every write tool (saved, revision, notPersisted, conflictsRedone, warnings)
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
@@ -184,12 +188,12 @@ reads: workouts, routines, week plan, body weight (verified live; volume and
 best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
 profile), `read_profile`, `read_settings`, `read_document`, stats (PRs match
 openGym's on the demo profile), body weight, goal, settings, notes,
-favourites and the raw write (verified live).
+favourites and the raw write, routines and the plan (verified live).
 
 Planned, in order:
 
-1. Write and delete tools for routines, the plan, workouts and custom
-   exercises. Logging or editing a
+1. Write and delete tools for workouts and custom exercises. Logging or
+   editing a
    workout must set `vol`, `topW` and `prs` the way the app does, and rebuild
    later sessions' PR badges when history changes (`rebuildPrHistory`, see
    docs/OPENGYM.md "Stats").
