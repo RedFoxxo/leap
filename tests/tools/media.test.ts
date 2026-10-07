@@ -93,16 +93,19 @@ describe('write_attach_media', () => {
     await h.close()
   })
 
-  it('refuses a seventh file, a duplicate, an unknown workout, and an instance without media', async () => {
+  it('refuses a seventh file, a duplicate, an unknown workout, and an instance without media, before uploading', async () => {
     const state = profile()
     const w = (state.workouts as any[])[1]
     w.media = Array.from({ length: 6 }, (_, i) => ({ kind: 'image', hash: String(i).repeat(64), mime: 'image/png', size: 1, width: 1, height: 1, at: 1 }))
-    const { h } = await setup({ state })
+    const { h, files } = await setup({ state })
     expect((await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-push' })).text).toMatch(/already has 6/)
+    expect(files.size).toBe(0)
     expect((await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'nope' })).text).toMatch(/no workout with id "nope"/)
     const twice = await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-legs' })
     expect(twice.isError).toBe(false)
+    const uploads = files.size
     expect((await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-legs' })).text).toMatch(/already on the workout/)
+    expect(files.size).toBe(uploads)
     await h.close()
     const off = await setup({ media: null })
     expect((await off.h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-legs' })).text).toMatch(/does not store photos and videos/)

@@ -33,6 +33,11 @@ describe('inspect', () => {
     expect(inspect(file('gps-uuid.mp4'))).toMatchObject({ hasLocation: true })
   })
 
+  it('reports a portrait video the way it is shown (rotated by its display matrix)', () => {
+    expect(inspect(file('portrait.mp4'))).toMatchObject({ width: 16, height: 32 })
+    expect(inspect(file('clip.mp4'))).toMatchObject({ width: 32, height: 16 })
+  })
+
   it('finds 3GPP locations and GPS telemetry tracks', () => {
     expect(locationIn(new TextEncoder().encode('....loci....'))).toBe(true)
     expect(locationIn(new TextEncoder().encode('...<exif:GPSLatitude>...'))).toBe(true)

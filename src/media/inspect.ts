@@ -226,8 +226,11 @@ function isoBmff(b: Uint8Array): { width: number; height: number; dur?: number; 
     if (!hdlr || ascii(b, hdlr.start + 8, 4) !== 'vide') continue
     const tkhd = child(b, trak, 'tkhd')
     if (!tkhd) continue
-    const width = Math.round(u32be(b, tkhd.end - 8) / 65536)
-    const height = Math.round(u32be(b, tkhd.end - 4) / 65536)
+    const stored = { width: Math.round(u32be(b, tkhd.end - 8) / 65536), height: Math.round(u32be(b, tkhd.end - 4) / 65536) }
+    // The display matrix sits just before the size; a quarter turn (a = d = 0) is how phones mark portrait video.
+    const matrix = tkhd.end - 8 - 36
+    const quarterTurn = matrix >= tkhd.start && u32be(b, matrix) === 0 && u32be(b, matrix + 16) === 0
+    const { width, height } = quarterTurn ? { width: stored.height, height: stored.width } : stored
     const stsd = (() => {
       const minf = mdia && child(b, mdia, 'minf')
       const stbl = minf && child(b, minf, 'stbl')
