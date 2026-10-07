@@ -92,7 +92,8 @@ src/
     ids.ts             entry ids in the app's format
   tools/
     types.ts, context.ts, respond.ts, index.ts
-    account/           read_me, read_instance
+    account/           read_me, read_instance; profile.ts: read_profile, read_settings,
+                       read_document (raw escape hatch: any top-level key)
     exercises/         read_exercises, read_exercise
     training/          read_workouts, read_workout, read_routines, read_routine,
                        read_week_plan, read_bodyweight; format.ts shapes workouts for output
@@ -172,11 +173,10 @@ layer (verified live, including a real 409 from a second writer), the exercise
 catalogue with `read_exercises` and `read_exercise` (verified live), training
 reads: workouts, routines, week plan, body weight (verified live; volume and
 best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
-profile).
+profile), `read_profile`, `read_settings`, `read_document`.
 
 Planned, in order:
 
-1. Profile overview, settings and the raw-document escape hatch; stats (1RM,
-   PRs, exercise history, volume, muscle balance).
+1. Stats: 1RM, PRs, exercise history, volume, muscle balance.
 3. Write and delete tools for training data and settings.
 4. Media, Coach, account, admin.

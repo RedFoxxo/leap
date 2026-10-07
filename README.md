@@ -87,9 +87,9 @@ Keep the token out of config files: export it in your shell profile
 
 ## Tools
 
-**read**: `read_workouts`, `read_workout`, `read_routines`, `read_routine`,
+**read**: `read_profile`, `read_settings`, `read_workouts`, `read_workout`, `read_routines`, `read_routine`,
 `read_week_plan`, `read_bodyweight`, `read_exercises`, `read_exercise`,
-`read_me`, `read_instance`
+`read_me`, `read_instance`, `read_document`
 
 More tools are on the way; see [CLAUDE.md](CLAUDE.md) for the plan.
 

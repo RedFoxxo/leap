@@ -1,19 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
-import { loadConfig } from '../../src/config.js'
-import { HttpCore } from '../../src/http/core.js'
-import { StateStore } from '../../src/state/store.js'
-import { profile } from '../fixtures/profile.js'
-import { LIVE, liveClient } from './helpers.js'
-
-/** Replaces the test profile with the fixture. Only ever run against the throwaway test server. */
-export async function seedFixture(): Promise<void> {
-  const config = loadConfig()
-  const http = new HttpCore({ baseUrl: config.baseUrl, token: config.token })
-  const current = await new StateStore(http).load()
-  if (!current.ok) throw new Error(current.message)
-  const r = await http.request({ method: 'PUT', path: '/api/data', json: { state: profile(), baseRev: current.data.rev } })
-  if (!r.ok) throw new Error(r.message)
-}
+import { LIVE, liveClient, seedFixture } from './helpers.js'
 
 describe.runIf(LIVE)('training reads (live)', () => {
   beforeAll(seedFixture)

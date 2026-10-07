@@ -22,3 +22,5 @@ MCP clients in the server handshake.
   drop sets, rest-pause, per-side, timed, cardio), `read_routines`,
   `read_routine`, `read_week_plan` (date overrides win over the weekday) and
   `read_bodyweight` (goal, 7- and 30-day change).
+- `read_profile` (overview, today and the next training day), `read_settings`
+  and `read_document`, the raw escape hatch for any part of the profile.
