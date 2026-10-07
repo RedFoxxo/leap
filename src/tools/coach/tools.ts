@@ -134,7 +134,8 @@ export const writeCoachRequest = defineTool({
     if (args.lang) body.lang = args.lang
     const queued = await ctx.http.request<{ job: { id: string } }>({ method: 'POST', path: `/api/coach/${args.kind}`, json: body })
     if (!queued.ok) return coachFailure('The Coach did not take the job', queued)
-    const id = queued.data.job.id
+    const id = isRecord(queued.data) && isRecord(queued.data.job) && typeof queued.data.job.id === 'string' ? queued.data.job.id : undefined
+    if (!id) return failure('The Coach answered without a job id; check read_coach to see whether it is working')
     const deadline = Date.now() + (args.waitSec ?? 60) * 1000
     while (Date.now() < deadline) {
       await sleep(1500)

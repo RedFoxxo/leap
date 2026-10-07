@@ -58,6 +58,12 @@ describe('write_coach_request', () => {
     await h.close()
   })
 
+  it('reports an answer without a job id instead of failing', async () => {
+    const { h } = await setup(null, (f) => f.stub.post('/api/coach/debrief', { ok: true }))
+    expect((await h.call('write_coach_request', { kind: 'debrief', waitSec: 0 })).text).toMatch(/without a job id/)
+    await h.close()
+  })
+
   it('explains a missing consent and never gives it', async () => {
     const { h, fake } = await setup(null, (f) =>
       f.stub.on({ method: 'POST', path: '/api/coach/plan', status: 403, body: { error: 'the Coach needs your go-ahead first', code: 'consent' } }),

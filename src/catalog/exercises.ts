@@ -128,7 +128,11 @@ export class BuiltinCatalogProvider {
 
   private async load(): Promise<Exercise[]> {
     try {
-      return JSON.parse(readFileSync(this.cacheFile, 'utf8')) as Exercise[]
+      const cached: unknown = JSON.parse(readFileSync(this.cacheFile, 'utf8'))
+      // A damaged or foreign cache is downloaded again rather than trusted.
+      if (Array.isArray(cached) && cached.length > 0 && cached.every((e) => isRecord(e) && typeof e.id === 'string' && typeof e.name === 'string' && Array.isArray(e.secondary) && Array.isArray(e.steps))) {
+        return cached as Exercise[]
+      }
     } catch {
       // not cached yet, or unreadable: download
     }

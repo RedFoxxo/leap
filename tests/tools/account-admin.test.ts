@@ -32,8 +32,14 @@ describe('account', () => {
 
   it('offers no tool that takes a password', async () => {
     const h = await harness()
+    const names = (schema: unknown): string[] => {
+      if (!schema || typeof schema !== 'object') return []
+      const node = schema as Record<string, unknown>
+      const own = node.properties && typeof node.properties === 'object' ? Object.keys(node.properties) : []
+      return [...own, ...Object.values(node).flatMap((v) => (Array.isArray(v) ? v.flatMap(names) : names(v)))]
+    }
     for (const tool of await h.listTools()) {
-      const props = Object.keys(((tool as unknown as { inputSchema: { properties?: object } }).inputSchema.properties ?? {}) as object)
+      const props = names((tool as unknown as { inputSchema: unknown }).inputSchema)
       expect(props.filter((p) => /password|current|token|secret/i.test(p)), tool.name).toEqual([])
     }
     await h.close()

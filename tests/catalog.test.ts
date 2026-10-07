@@ -50,6 +50,18 @@ describe('BuiltinCatalogProvider', () => {
     expect(offline.calls).toHaveLength(0)
   })
 
+  it('downloads again when the cache is damaged', async () => {
+    const cacheFile = tmpCache()
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const { dirname } = await import('node:path')
+    mkdirSync(dirname(cacheFile), { recursive: true })
+    writeFileSync(cacheFile, '{"not":"a list"}')
+    const stub = new FetchStub().get('/exercises.json', BODY)
+    const r = await provider(stub, cacheFile).get()
+    expect(r.exercises.size).toBe(5)
+    expect(stub.calls).toHaveLength(1)
+  })
+
   it('never sends the openGym token to the dataset host', async () => {
     const stub = new FetchStub().get('/exercises.json', BODY)
     await provider(stub, tmpCache()).get()
