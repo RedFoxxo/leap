@@ -50,6 +50,12 @@ describe('StateStore.update', () => {
     expect(r.ok && r.data).toMatchObject({ result: { d: '2026-10-07' }, rev: 8, retries: 0, verified: true, notPersisted: [] })
   })
 
+  it('keeps a "token" value stored in the profile exactly as it is', async () => {
+    const fake = new FakeOpenGym({ ...profile(), integration: { token: 'not-a-secret-of-leap' } })
+    await store(fake).update(addWeighIn)
+    expect(fake.state!.integration).toEqual({ token: 'not-a-secret-of-leap' })
+  })
+
   it('moves _ts forward even when the clock is behind the stored one', async () => {
     const fake = new FakeOpenGym({ ...profile(), _ts: NOW + 60_000 })
     await store(fake).update(addWeighIn)

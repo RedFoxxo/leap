@@ -43,6 +43,8 @@ export interface Bytes {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000
+/** Routes whose answers can carry a session token: a renewed one on /api/me, pairing, a password change. */
+const TOKEN_ROUTES = /^\/api\/(me|pair\/|account\/|login|register|device-link)/
 const BODY_CAP = 4000
 
 /**
@@ -137,7 +139,10 @@ export class HttpCore {
     let text: string
     try {
       const raw = await response.text()
-      text = spec.keepTokens && response.ok ? redactToken(raw, this.token) : this.redact(raw)
+      // The configured token never appears in a body. `"token"` fields are removed only where openGym hands
+      // tokens out; elsewhere (the profile document) such a field is user data and must round-trip intact.
+      const handsOutTokens = TOKEN_ROUTES.test(spec.path) && !(spec.keepTokens && response.ok)
+      text = handsOutTokens ? this.redact(raw) : redactToken(raw, this.token)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       const unknown =
