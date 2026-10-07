@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { customExercises } from '../../catalog/exercises.js'
 import { today } from '../../domain/dates.js'
 import { apply, refuse } from '../../state/store.js'
-import { isRecord, LIST_KEYS, listOf, MAP_KEYS, mapOf, unitOf, writableList, writableMap, type State } from '../../state/types.js'
+import { isRecord, listOf, mapOf, unitOf, writableList, writableMap, type State } from '../../state/types.js'
 import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
 import { exerciseId, isoDate } from '../schema.js'
@@ -17,7 +17,7 @@ async function exerciseCheck(ctx: ToolContext): Promise<(state: State, id: strin
   const builtin = await ctx.builtinExercises()
   return (state, id) => {
     if (builtin.exercises.has(id) || customExercises(state).some((c) => c.id === id)) return undefined
-    if (builtin.error && !id.startsWith('c')) return undefined
+    if (builtin.error && /^\d{4}$/.test(id)) return undefined
     return `no exercise with id "${id}"; find ids with read_exercises`
   }
 }
@@ -29,6 +29,7 @@ export const writeBodyweight = defineTool({
   input: { weight, date: isoDate.optional() },
   async handler(args, ctx) {
     const date = args.date ?? today()
+    if (date > today()) return invalid(`${date} is in the future; a weigh-in is logged for a day that happened`)
     return change(
       ctx,
       'save the weigh-in',
@@ -88,11 +89,26 @@ export const writeGoalWeight = defineTool({
 
 const flag = z.boolean().optional()
 
+/** The languages the app has (Settings → Language). */
+const LANGS = ['en', 'de', 'de-CH', 'es', 'fr', 'it', 'pt', 'pt-BR', 'pl', 'tr', 'ru', 'uk', 'zh', 'ko', 'hi', 'th', 'hu', 'ar'] as const
+
+/** Whether the server can read a time zone: it skips a reminder whose zone it cannot. */
+function validTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
+
 /** The settings openGym reads, with the values it accepts. Unknown settings go through write_document. */
 const SETTINGS = {
-  lang: z.string().regex(/^[a-z]{2}(-[A-Z]{2})?$/).optional().describe('UI language, e.g. en, de, de-CH, pl, pt-BR'),
-  theme: z.string().min(1).max(30).optional(),
-  accent: z.string().min(1).max(30).optional(),
+  lang: z.enum(LANGS).optional().describe('UI language'),
+  theme: z.enum(['dark', 'light', 'system']).optional(),
+  accent: z.enum(['lime', 'sky', 'orange', 'violet', 'pink', 'red', 'teal', 'gold']).optional().describe('lime green, sky blue, orange, violet purple, pink, red, teal, gold yellow'),
   restSec: z.number().int().min(0).max(3600).optional().describe('Default rest between sets, seconds'),
   restPauseSec: z.number().int().min(0).max(600).optional().describe('Rest between rest-pause bursts, seconds'),
   effort: z.enum(['none', 'rir', 'rpe']).optional().describe('Per-set effort scale'),
@@ -102,7 +118,7 @@ const SETTINGS = {
   workoutView: z.enum(['cards', 'list', 'compact']).optional(),
   wdec: z.union([z.literal(1), z.literal(2)]).optional().describe('Decimals shown on weights'),
   speedUnit: z.enum(['kmh', 'mph']).nullable().optional().describe('Cardio speed display; null follows the weight unit'),
-  heatmapMetric: z.string().min(1).max(20).optional(),
+  heatmapMetric: z.enum(['time', 'vol']).optional(),
   sound: flag,
   soundOnSilent: flag,
   timerFlash: flag,
@@ -120,7 +136,7 @@ const SETTINGS = {
     })
     .strict()
     .optional()
-    .describe('Daily "workout planned today" push; merged into the current reminder'),
+    .describe("Daily \"workout planned today\" push; merged into the current reminder. Without a time zone it gets this computer's. It needs a device with push notifications on"),
 }
 
 export const writeSettings = defineTool({
@@ -131,6 +147,7 @@ export const writeSettings = defineTool({
   async handler(args, ctx) {
     const given = Object.entries(args).filter(([, v]) => v !== undefined)
     if (!given.length) return invalid('no setting given')
+    if (typeof args.reminder?.tz === 'string' && !validTimeZone(args.reminder.tz)) return invalid(`"${args.reminder.tz}" is not a time zone (e.g. Europe/Warsaw)`)
     return change(
       ctx,
       'save settings',
@@ -140,7 +157,10 @@ export const writeSettings = defineTool({
           const from = draft[key] ?? null
           if (key === 'reminder') {
             const current = isRecord(draft.reminder) ? draft.reminder : { on: false, time: '08:00', tz: null }
-            draft.reminder = { ...current, ...(value as object) }
+            const next: Record<string, unknown> = { ...current, ...(value as object) }
+            // The app sets the device's zone with every reminder change; without one the server fires it on UTC.
+            if (next.tz == null && (next.on === true || (value as { time?: unknown }).time !== undefined)) next.tz = localTimeZone()
+            draft.reminder = next
           } else draft[key] = value
           // A profile that never picked a language follows an automatic one (`langAuto`) and ignores `lang`; the app's own choice turns it off.
           if (key === 'lang') draft.langAuto = false
@@ -210,12 +230,15 @@ export const writeFavourite = defineTool({
 })
 
 /** Keys with dedicated tools or owned by openGym: never set through the raw escape hatch. */
-const RAW_PROTECTED = new Set([...LIST_KEYS, ...MAP_KEYS, 'unit', 'unitSet', 'resetAt', 'resetIds', 'coach', 'active', 'targetW', '_ts', '_rev'])
+const RAW_PROTECTED = new Set([
+  'workouts', 'routines', 'bodyweight', 'customEx', 'week', 'dayPlan', 'exWeights', 'exNotes', 'favEx', 'reminder', 'targetW',
+  'unit', 'unitSet', 'resetAt', 'resetIds', 'coach', 'active', '_ts', '_rev',
+])
 
 export const writeDocument = defineTool({
   name: 'write_document',
   description:
-    `Escape hatch: set one top-level value of the profile document that no dedicated tool covers (a setting from a newer openGym version), or remove it with null. Refused for training data, the unit and openGym\'s own bookkeeping. Check the current value with read_document first. ${LAST_CHANGE_NOTE}`,
+    `Escape hatch: set one top-level value of the profile document that no dedicated tool covers (equipment profiles, plate inventory, bar weights, a setting from a newer openGym version), or remove it with null. Lists and maps keep their type. Refused for training data, values with their own tool, the unit and openGym's own bookkeeping. Check the current value with read_document first. ${LAST_CHANGE_NOTE}`,
   input: { key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/), value: z.unknown() },
   async handler(args, ctx) {
     if (RAW_PROTECTED.has(args.key)) return invalid(`"${args.key}" has a dedicated tool or belongs to openGym; it cannot be set raw`)

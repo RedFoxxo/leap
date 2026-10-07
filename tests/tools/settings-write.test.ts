@@ -116,6 +116,35 @@ describe('write_settings', () => {
   })
 })
 
+describe('settings the app would not take', () => {
+  it('gives a reminder turned on the local time zone, and refuses zones the server cannot read', async () => {
+    const { h, doc, fake } = await setup({ ...profile(), reminder: { on: false, time: '08:00', tz: null } })
+    await h.call('write_settings', { reminder: { on: true } })
+    expect(doc().reminder).toEqual({ on: true, time: '08:00', tz: Intl.DateTimeFormat().resolvedOptions().timeZone })
+    const puts = fake.puts.length
+    expect((await h.call('write_settings', { reminder: { tz: 'Mars/Olympus' } })).text).toMatch(/not a time zone/)
+    expect(fake.puts).toHaveLength(puts)
+    await h.close()
+  })
+
+  it('accepts only the values the app offers', async () => {
+    const { h, fake } = await setup()
+    for (const args of [{ theme: 'neon' }, { accent: 'purple' }, { lang: 'xx' }, { heatmapMetric: 'reps' }]) {
+      expect((await h.call('write_settings', args)).isError, JSON.stringify(args)).toBe(true)
+    }
+    expect(fake.stub.calls).toHaveLength(0)
+    expect((await h.call('write_settings', { theme: 'system', accent: 'violet', lang: 'pt-BR', heatmapMetric: 'vol' })).isError).toBe(false)
+    await h.close()
+  })
+
+  it('refuses a weigh-in in the future', async () => {
+    const { h, fake } = await setup()
+    expect((await h.call('write_bodyweight', { weight: 80, date: '2999-01-01' })).text).toMatch(/in the future/)
+    expect(fake.stub.calls).toHaveLength(0)
+    await h.close()
+  })
+})
+
 describe('write_exercise_note and write_favourite', () => {
   it('sets and clears a note', async () => {
     const { h, doc } = await setup()
@@ -155,9 +184,18 @@ describe('write_document', () => {
     await h.close()
   })
 
+  it('sets settings that have no dedicated tool, such as the plate inventory', async () => {
+    const { h, doc } = await setup()
+    const r = await h.call('write_document', { key: 'barWeights', value: { '0025': 15 } })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().barWeights).toEqual({ '0025': 15 })
+    expect((await h.call('write_document', { key: 'plates', value: [1] })).text).toMatch(/plates must be an object/)
+    await h.close()
+  })
+
   it('refuses training data, the unit and openGym bookkeeping', async () => {
     const { h, fake } = await setup()
-    for (const key of ['workouts', 'unit', 'coach', 'resetAt', 'week', 'targetW']) {
+    for (const key of ['workouts', 'unit', 'coach', 'resetAt', 'week', 'targetW', 'reminder', 'exNotes', 'favEx']) {
       expect((await h.call('write_document', { key, value: 1 })).text, key).toMatch(/cannot be set raw/)
     }
     expect(fake.stub.calls).toHaveLength(0)
