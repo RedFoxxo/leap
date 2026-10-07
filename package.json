@@ -1,0 +1,59 @@
+{
+  "name": "@redfoxxo/leap",
+  "version": "0.1.0",
+  "description": "MCP server for openGym: log, edit and analyze your workouts, routines, body weight and PRs on your self-hosted instance",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "opengym",
+    "gym",
+    "fitness",
+    "workout",
+    "ai",
+    "claude",
+    "opencode"
+  ],
+  "author": "Foxxo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RedFoxxo/leap.git"
+  },
+  "homepage": "https://github.com/RedFoxxo/leap#readme",
+  "bugs": {
+    "url": "https://github.com/RedFoxxo/leap/issues"
+  },
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "leap": "build/index.js"
+  },
+  "files": [
+    "build/**/*.js",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:live": "OPENGYM_LIVE=1 vitest run --config vitest.live.config.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
