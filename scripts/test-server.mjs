@@ -1,11 +1,12 @@
 // Throwaway openGym API in Docker for live tests. Never point live write tests at a real profile.
 //
-//   node scripts/test-server.mjs start   # container on 127.0.0.1:3999, admin test profile, token in .cache/test-server/env
+//   node scripts/test-server.mjs start   # container on 127.0.0.1:3999, admin test profile, AI Coach with the
+//                                        # fixture provider, token in .cache/test-server/env
 //   node scripts/test-server.mjs stop    # removes the container and its data
 //
 // Then: set -a; . .cache/test-server/env; set +a; npm run test:live
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const NAME = 'leap-opengym-test'
@@ -25,6 +26,18 @@ function removeContainer() {
   } catch {
     // not running
   }
+}
+
+/**
+ * The server writes some files as root (Coach job directories), which this user cannot delete.
+ * A short-lived container of the same image empties the data folder first.
+ */
+function removeData() {
+  // Only when it exists: mounting a missing folder makes Docker create it, owned by root.
+  if (existsSync(`${DIR}/data`)) {
+    docker('run', '--rm', '-v', `${DIR}/data:/data`, '--entrypoint', 'sh', IMAGE, '-c', 'rm -rf /data/* /data/.[!.]* 2>/dev/null; true')
+  }
+  rmSync(DIR, { recursive: true, force: true })
 }
 
 function run(adminUid) {
@@ -58,7 +71,7 @@ async function browser(path, cookie, body) {
 
 async function start() {
   removeContainer()
-  rmSync(DIR, { recursive: true, force: true })
+  removeData()
   mkdirSync(`${DIR}/data`, { recursive: true })
 
   run()
@@ -74,6 +87,14 @@ async function start() {
   const { code } = (await browser('/api/pair/create', login.cookie)).json
   const paired = await browser('/api/pair/redeem', undefined, { code })
 
+  // The AI Coach with openGym's built-in test provider: the whole loop, no AI account.
+  const coach = await fetch(`${ORIGIN}/api/admin/coach/config`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${paired.json.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: true, provider: 'fixture' }),
+  })
+  if (!coach.ok) throw new Error(`enabling the Coach: ${coach.status} ${await coach.text()}`)
+
   writeFileSync(
     `${DIR}/env`,
     `OPENGYM_URL=${ORIGIN}\nOPENGYM_TOKEN=${paired.json.token}\nOPENGYM_TEST_PASSWORD=${PROFILE.password}\n`,
@@ -84,7 +105,7 @@ async function start() {
 
 function stop() {
   removeContainer()
-  rmSync(DIR, { recursive: true, force: true })
+  removeData()
   process.stderr.write('openGym test server removed\n')
 }
 
