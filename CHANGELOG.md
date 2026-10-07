@@ -53,6 +53,14 @@ MCP clients in the server handshake.
   it with leap's tools), `write_coach_resolve`, `read_coach_cohort`,
   `write_coach_share` and `delete_coach_data`. leap never gives consent; that
   stays in the app.
+- Account: `read_account`, `write_passkey_name`, `write_pairing_code` (pair the
+  phone app or another computer) and `delete_all_sessions`. Changing the
+  password or sign-in e-mail and removing passkeys stay in the app, so no
+  password passes through an AI conversation.
+- Admin (admin profiles only): users (`admin_users`, `admin_user`,
+  `admin_disable_user`, `admin_delete_user` with a name check,
+  `admin_password_reset`), invites, the activity log, and the AI Coach
+  settings.
 - Fixed: assistance machines (where less weight is better) are now recognised
   as openGym recognises them, a leverage machine named "assisted" or a custom
   exercise marked so; before, 15 exercises with the dataset's "assisted"

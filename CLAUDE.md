@@ -102,7 +102,9 @@ src/
   tools/
     types.ts, context.ts, respond.ts, index.ts
     account/           read_me, read_instance; profile.ts: read_profile, read_settings,
-                       read_document (raw escape hatch: any top-level key)
+                       read_document (raw escape hatch: any top-level key); write.ts:
+                       read_account, write_passkey_name, write_pairing_code, delete_all_sessions
+    admin/             admin_* (users, invites, activity log, Coach settings); admin profiles only
     exercises/         read_exercises, read_exercise, write_custom_exercise,
                        delete_custom_exercise (history keeps its name, as in the app)
     training/          read_workouts, read_workout, read_routines, read_routine,
@@ -216,6 +218,12 @@ AI Coach (verified live with the fixture provider). Applying a proposal is
 done with leap's write tools, not by re-implementing the app's apply code
 (decided with the user, 2026-10-07). leap never gives consent.
 
-Planned, in order:
+Account and admin (verified live). Not offered, decided with the user
+(2026-10-07): anything that needs the current password as proof (setting or
+removing the password or sign-in e-mail, removing a passkey, device links) and
+filing a Coach provider credential, so no password or secret passes through
+an AI conversation; passkey ceremonies, which need a device; push
+subscriptions, which belong to a browser. A test asserts that no tool takes a
+password, token or secret.
 
-1. Account and admin.
+Remaining: a review of the whole branch, then the first release (0.1.0).

@@ -87,7 +87,7 @@ Keep the token out of config files: export it in your shell profile
 | `read_` | Reads only | allow |
 | `write_` | Logs, creates and updates | ask |
 | `delete_` | Deletes | ask |
-| `admin_` | Instance administration (users, invites, audit log, Coach settings); needs an admin profile | deny |
+| `admin_` | Instance administration (users, invites, activity log, Coach settings); needs an admin profile | deny |
 
 ## Tools
 
@@ -95,17 +95,31 @@ Keep the token out of config files: export it in your shell profile
 `read_week_plan`, `read_bodyweight`, `read_exercise_history`, `read_records`,
 `read_training_summary`, `read_muscle_balance`, `read_exercises`, `read_exercise`,
 `read_media_usage`, `read_media`, `read_coach`, `read_coach_cohort`,
-`read_me`, `read_instance`, `read_document`
+`read_account`, `read_me`, `read_instance`, `read_document`
 
 **write**: `write_log_workout`, `write_update_workout`, `write_routine`, `write_copy_routine`, `write_week_plan`,
 `write_day_plan`, `write_custom_exercise`, `write_bodyweight`, `write_goal_weight`, `write_settings`,
 `write_exercise_note`, `write_favourite`, `write_attach_media`, `write_coach_request`,
-`write_coach_resolve`, `write_coach_share`, `write_document`
+`write_coach_resolve`, `write_coach_share`, `write_passkey_name`, `write_pairing_code`,
+`write_document`
 
 **delete**: `delete_workout`, `delete_routine`, `delete_custom_exercise`,
-`delete_bodyweight`, `delete_media`, `delete_media_sweep`, `delete_coach_data`
+`delete_bodyweight`, `delete_media`, `delete_media_sweep`, `delete_coach_data`, `delete_all_sessions`
 
-More tools are on the way; see [CLAUDE.md](CLAUDE.md) for the plan.
+**admin** (admin profiles only): `admin_users`, `admin_user`, `admin_disable_user`,
+`admin_delete_user`, `admin_password_reset`, `admin_invites`, `admin_create_invite`,
+`admin_revoke_invite`, `admin_audit`, `admin_clear_audit`, `admin_coach`,
+`admin_coach_config`, `admin_coach_test`, `admin_coach_models`, `admin_coach_disconnect`
+
+### Not offered, on purpose
+
+- Anything that needs your current password as proof: changing the password
+  or sign-in e-mail, removing a passkey, device links. Do these in the app,
+  so your password never passes through an AI conversation. For the same
+  reason the Coach's provider key is filed in the app.
+- Creating passkeys and push notifications: they need a device or browser.
+- Changing the weight unit: the app converts every stored weight when you
+  switch it.
 
 ## License
 
