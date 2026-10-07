@@ -11,6 +11,8 @@ import { change } from '../write.js'
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/, 'must be a SHA-256 (64 lowercase hex characters)')
 const MB = 1024 * 1024
+/** Photos and videos can be large and connections slow; a JSON call keeps the default. */
+const TRANSFER_TIMEOUT_MS = 10 * 60_000
 /** At most six photos or videos per workout, as in the app. */
 export const WORKOUT_MEDIA_MAX = 6
 
@@ -68,6 +70,10 @@ export const readMediaUsage = defineTool({
 
 function capProblem(p: Prepared, caps: MediaCaps): string | undefined {
   const size = p.bytes.length
+  // The bounds openGym checks every reference against; outside them the app shows nothing.
+  const side = (n: number) => Number.isInteger(n) && n >= 1 && n <= 16384
+  if (!side(p.info.width) || !side(p.info.height)) return `the file says it is ${p.info.width}×${p.info.height} pixels; openGym shows sides of 1 to 16384 pixels only`
+  if (p.info.dur !== undefined && p.info.dur > 3600) return `the video is ${p.info.dur} s; openGym shows videos up to an hour only`
   const { kind } = p.info
   const capMB = kind === 'video' ? caps.videoMB : kind === 'gif' ? caps.gifMB : caps.imageMB
   if (capMB && size > capMB * MB) {
@@ -114,6 +120,7 @@ export const writeAttachMedia = defineTool({
       method: 'PUT',
       path: `/api/media/${prepared.hash}`,
       bytes: { data: prepared.bytes, contentType: prepared.info.mime },
+      timeoutMs: TRANSFER_TIMEOUT_MS,
     })
     if (!up.ok) return failure('openGym did not take the file', up)
     const mime = (up.data.mime in KIND_OF ? up.data.mime : prepared.info.mime) as MediaMime
@@ -208,13 +215,13 @@ export const deleteMedia = defineTool({
   },
 })
 
-export const readMedia = defineTool({
-  name: 'read_media',
+export const writeDownloadMedia = defineTool({
+  name: 'write_download_media',
   description:
-    'Download one of the profile\'s photos or videos (by hash, see read_workout or read_exercise) to a new local file. `saveTo` is an absolute path (~/ allowed): a directory gets "<hash>.<ext>"; an existing file is never overwritten. The download is checked against its hash.',
+    'Download one of the profile\'s photos or videos (by hash, see read_workout or read_exercise) to a new file on this computer. `saveTo` is an absolute path (~/ allowed): a directory gets "<hash>.<ext>"; a file name must end in the extension of the file\'s type (.jpg, .png, .webp, .gif, .mp4, .mov, .webm). An existing file is never overwritten. The download is checked against its hash.',
   input: { hash, saveTo: z.string().min(1).max(4096) },
   async handler(args, ctx) {
-    const r = await ctx.http.request({ method: 'GET', path: `/api/media/${args.hash}`, expect: 'bytes' })
+    const r = await ctx.http.request({ method: 'GET', path: `/api/media/${args.hash}`, expect: 'bytes', timeoutMs: TRANSFER_TIMEOUT_MS })
     if (!r.ok) return failure(r.status === 404 ? 'openGym does not have that file for this profile' : 'Could not download the file', r)
     if (sha256(r.data.data) !== args.hash) return failure('The download does not match its hash; nothing was saved')
     const mime = r.data.contentType.split(';')[0]!.trim()
@@ -240,6 +247,6 @@ export const deleteMediaSweep = defineTool({
   },
 })
 
-export const mediaReadTools = [readMediaUsage, readMedia]
-export const mediaWriteTools = [writeAttachMedia]
+export const mediaReadTools = [readMediaUsage]
+export const mediaWriteTools = [writeAttachMedia, writeDownloadMedia]
 export const mediaDeleteTools = [deleteMedia, deleteMediaSweep]

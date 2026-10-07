@@ -83,6 +83,16 @@ describe('write_attach_media', () => {
     await h.close()
   })
 
+  it('refuses a picture whose size openGym would not show', async () => {
+    const { h, fake, dir } = await setup()
+    const png = new Uint8Array(readFileSync(fixture('text.png')))
+    new DataView(png.buffer).setUint32(16, 20000)
+    writeFileSync(join(dir, 'huge.png'), png)
+    expect((await h.call('write_attach_media', { path: join(dir, 'huge.png'), workoutId: 'w-legs' })).text).toMatch(/1 to 16384 pixels/)
+    expect(fake.stub.calls.filter((c) => c.method === 'PUT')).toHaveLength(0)
+    await h.close()
+  })
+
   it('refuses a seventh file, a duplicate, an unknown workout, and an instance without media', async () => {
     const state = profile()
     const w = (state.workouts as any[])[1]
@@ -113,18 +123,30 @@ describe('delete_media', () => {
   })
 })
 
-describe('read_media and read_media_usage', () => {
+describe('write_download_media and read_media_usage', () => {
   it('downloads to a new file, checks the hash, never overwrites', async () => {
     const { h, files, dir } = await setup()
     await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-legs' })
     const [hash, bytes] = [...files.entries()][0]!
-    const r = await h.call('read_media', { hash, saveTo: dir })
+    const r = await h.call('write_download_media', { hash, saveTo: dir })
     expect(r.json).toMatchObject({ saved: join(dir, `${hash}.jpg`), mime: 'image/jpeg' })
     expect(new Uint8Array(readFileSync(join(dir, `${hash}.jpg`)))).toEqual(bytes)
     expect(statSync(join(dir, `${hash}.jpg`)).mode & 0o777).toBe(0o600)
-    expect((await h.call('read_media', { hash, saveTo: dir })).text).toMatch(/already exists/)
-    expect((await h.call('read_media', { hash: 'd'.repeat(64), saveTo: dir })).text).toMatch(/does not have that file/)
+    expect((await h.call('write_download_media', { hash, saveTo: dir })).text).toMatch(/already exists/)
+    expect((await h.call('write_download_media', { hash: 'd'.repeat(64), saveTo: dir })).text).toMatch(/does not have that file/)
     expect(existsSync(join(dir, `${'d'.repeat(64)}.jpg`))).toBe(false)
+    await h.close()
+  })
+
+  it('saves only under a file name with the type’s extension', async () => {
+    const { h, files, dir } = await setup()
+    await h.call('write_attach_media', { path: fixture('plain.jpg'), workoutId: 'w-legs' })
+    const [hash] = [...files.keys()]
+    for (const name of ['authorized_keys', '.bashrc', 'photo.png', 'x.jpg.sh']) {
+      expect((await h.call('write_download_media', { hash, saveTo: join(dir, name) })).text, name).toMatch(/must end in \.jpg/)
+      expect(existsSync(join(dir, name)), name).toBe(false)
+    }
+    expect((await h.call('write_download_media', { hash, saveTo: join(dir, 'squat.JPEG') })).isError).toBe(false)
     await h.close()
   })
 
@@ -132,7 +154,7 @@ describe('read_media and read_media_usage', () => {
     const { h, fake, dir } = await setup()
     const wrong = 'e'.repeat(64)
     fake.stub.first({ method: 'GET', path: `/api/media/${wrong}`, body: new Uint8Array([1, 2, 3]) })
-    expect((await h.call('read_media', { hash: wrong, saveTo: dir })).text).toMatch(/does not match its hash; nothing was saved/)
+    expect((await h.call('write_download_media', { hash: wrong, saveTo: dir })).text).toMatch(/does not match its hash; nothing was saved/)
     expect(existsSync(join(dir, `${wrong}.bin`))).toBe(false)
     await h.close()
   })

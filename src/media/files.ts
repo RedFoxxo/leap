@@ -59,13 +59,24 @@ const EXT: Record<MediaMime, string> = {
 
 export const extensionOf = (mime: string) => (mime in KIND_OF ? EXT[mime as MediaMime] : 'bin')
 
-/** Writes a new file; an existing path is never overwritten. A directory gets `<hash>.<ext>`. */
+/**
+ * Writes a new file; an existing path is never overwritten. A directory gets
+ * `<hash>.<ext>`; a file name must carry the extension of the file's type, so a
+ * download can never become a script, a key or a start-up file.
+ */
 export function saveNew(target: string, hash: string, mime: string, bytes: Uint8Array): string {
   let path = expandPath(target)
+  const ext = extensionOf(mime)
+  let isDir = false
   try {
-    if (statSync(path).isDirectory()) path = join(path, `${hash}.${extensionOf(mime)}`)
+    isDir = statSync(path).isDirectory()
   } catch {
     // not there yet: a file name
+  }
+  if (isDir) path = join(path, `${hash}.${ext}`)
+  else {
+    const allowed = ext === 'jpg' ? ['jpg', 'jpeg'] : [ext]
+    if (!allowed.some((e) => path.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
   }
   const fd = openSync(path, 'wx', 0o600)
   try {

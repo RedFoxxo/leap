@@ -30,7 +30,7 @@ describe.runIf(LIVE)('media (live)', () => {
     expect(read.json.media.map((m: { kind: string }) => m.kind)).toEqual(['image', 'video'])
 
     const dir = mkdtempSync(join(tmpdir(), 'leap-live-media-'))
-    const saved = await c.call('read_media', { hash, saveTo: dir })
+    const saved = await c.call('write_download_media', { hash, saveTo: dir })
     expect(saved.isError, saved.text).toBe(false)
     const bytes = readFileSync(saved.json.saved)
     expect(bytes.includes(Buffer.from('LeapTestCam'))).toBe(false)
@@ -44,7 +44,7 @@ describe.runIf(LIVE)('media (live)', () => {
     const sweep = await c.call('delete_media_sweep')
     expect(sweep.isError, sweep.text).toBe(false)
     expect(sweep.json.removed).toBeGreaterThanOrEqual(1)
-    const gone = await c.call('read_media', { hash, saveTo: dir })
+    const gone = await c.call('write_download_media', { hash, saveTo: dir })
     expect(gone.text).toMatch(/does not have that file/)
     await c.close()
   })

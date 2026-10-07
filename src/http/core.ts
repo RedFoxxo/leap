@@ -33,6 +33,8 @@ export interface RequestSpec {
   expect?: 'json' | 'bytes'
   /** Keep `"token"` fields in the response body. Only `leap pair` needs this. */
   keepTokens?: boolean
+  /** Overrides the default timeout (file transfers). */
+  timeoutMs?: number
 }
 
 export interface Bytes {
@@ -105,7 +107,7 @@ export class HttpCore {
         headers,
         body: body as RequestInit['body'],
         redirect: 'manual',
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(spec.timeoutMs ?? this.timeoutMs),
       })
     } catch (error) {
       const reason = this.redact(error instanceof Error ? `${error.name}: ${error.message}` : String(error))

@@ -120,7 +120,7 @@ src/
                        per exercise; superset labels → sg ids), write_copy_routine,
                        delete_routine (also off weekdays and dates, as the app does),
                        write_week_plan, write_day_plan
-    media/             read_media_usage, read_media (download), write_attach_media,
+    media/             read_media_usage, write_download_media, write_attach_media,
                        delete_media (detach), delete_media_sweep
     coach/             read_coach, read_coach_cohort, write_coach_request (plan, review,
                        debrief; waits for the answer), write_coach_resolve, write_coach_share,
@@ -210,7 +210,9 @@ and against openGym's own code), custom exercises, media (verified live).
 
 Local files: leap reads a file only for `write_attach_media` (a regular file
 whose bytes are one of the seven media types) and writes one only for
-`read_media` (a new file, mode 600, never overwriting). Photos lose their
+`write_download_media` (a new file, mode 600, never overwriting, named with
+the extension of the media type, so it can never become a script, a key or a
+start-up file; a local write, so it is in the write tier). Photos lose their
 metadata before upload; videos with a location are refused. Both decided with
 the user (2026-10-07).
 

@@ -46,7 +46,8 @@ MCP clients in the server handshake.
 - Photos and videos: `write_attach_media` uploads a local file to a workout
   or custom exercise, after removing location, camera and time metadata from
   photos (the orientation stays); videos that record a location are refused.
-  `read_media` downloads to a new file, `read_media_usage` shows space and
+  `write_download_media` downloads to a new file named after its type,
+  `read_media_usage` shows space and
   limits, `delete_media` detaches, `delete_media_sweep` frees space at once.
 - AI Coach: `write_coach_request` (a plan, a review or a debrief; waits for
   the answer), `read_coach` (the waiting proposal with names and how to apply

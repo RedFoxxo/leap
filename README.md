@@ -94,12 +94,12 @@ Keep the token out of config files: export it in your shell profile
 **read**: `read_profile`, `read_settings`, `read_workouts`, `read_workout`, `read_routines`, `read_routine`,
 `read_week_plan`, `read_bodyweight`, `read_exercise_history`, `read_records`,
 `read_training_summary`, `read_muscle_balance`, `read_exercises`, `read_exercise`,
-`read_media_usage`, `read_media`, `read_coach`, `read_coach_cohort`,
+`read_media_usage`, `read_coach`, `read_coach_cohort`,
 `read_account`, `read_me`, `read_instance`, `read_document`
 
 **write**: `write_log_workout`, `write_update_workout`, `write_routine`, `write_copy_routine`, `write_week_plan`,
 `write_day_plan`, `write_custom_exercise`, `write_bodyweight`, `write_goal_weight`, `write_settings`,
-`write_exercise_note`, `write_favourite`, `write_attach_media`, `write_coach_request`,
+`write_exercise_note`, `write_favourite`, `write_attach_media`, `write_download_media`, `write_coach_request`,
 `write_coach_resolve`, `write_coach_share`, `write_passkey_name`, `write_pairing_code`,
 `write_document`
 
