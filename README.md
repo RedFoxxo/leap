@@ -72,27 +72,35 @@ Keep the token out of config files: export it in your shell profile
 
 ## opencode
 
-```json
+In `~/.config/opencode/opencode.jsonc` (OpenCode V2):
+
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "leap": {
-      "type": "local",
-      "command": ["npx", "-y", "@redfoxxo/leap@1"],
-      "environment": {
-        "OPENGYM_URL": "https://gym.example.com",
-        "OPENGYM_TOKEN": "{env:OPENGYM_TOKEN}"
-      }
-    }
+    "servers": {
+      "leap": {
+        "type": "local",
+        "command": ["npx", "-y", "@redfoxxo/leap@1"],
+        "environment": {
+          "OPENGYM_URL": "{env:OPENGYM_URL}",
+          "OPENGYM_TOKEN": "{env:OPENGYM_TOKEN}",
+        },
+      },
+    },
   },
-  "permission": {
-    "leap_read_*": "allow",
-    "leap_write_*": "ask",
-    "leap_delete_*": "ask",
-    "leap_admin_*": "deny"
-  }
+  "permissions": [
+    { "action": "leap_read_*", "resource": "*", "effect": "allow" },
+    { "action": "leap_write_*", "resource": "*", "effect": "ask" },
+    { "action": "leap_delete_*", "resource": "*", "effect": "ask" },
+    { "action": "leap_admin_*", "resource": "*", "effect": "deny" },
+  ],
 }
 ```
+
+`@1` follows 1.x releases. leap's tools take up context in every session where
+it is connected; to keep it for when you need it, add `"disabled": true` and
+connect it from `/mcps`.
 
 ## Permission tiers
 
