@@ -142,6 +142,8 @@ export const writeSettings = defineTool({
             const current = isRecord(draft.reminder) ? draft.reminder : { on: false, time: '08:00', tz: null }
             draft.reminder = { ...current, ...(value as object) }
           } else draft[key] = value
+          // A profile that never picked a language follows an automatic one (`langAuto`) and ignores `lang`; the app's own choice turns it off.
+          if (key === 'lang') draft.langAuto = false
           changed[key] = { from, to: draft[key] }
         }
         return apply(changed)

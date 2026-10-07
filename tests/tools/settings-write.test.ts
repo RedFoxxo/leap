@@ -98,6 +98,13 @@ describe('write_settings', () => {
     await h.close()
   })
 
+  it('makes a language choice stick on a profile that still follows the automatic one', async () => {
+    const { h, doc } = await setup({ ...profile(), langAuto: true })
+    await h.call('write_settings', { lang: 'pl' })
+    expect(doc()).toMatchObject({ lang: 'pl', langAuto: false })
+    await h.close()
+  })
+
   it('validates values, refuses an empty call and never touches the unit', async () => {
     const { h, fake } = await setup()
     expect((await h.call('write_settings', { effort: 'hard' })).isError).toBe(true)
