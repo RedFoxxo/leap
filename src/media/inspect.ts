@@ -121,6 +121,32 @@ function jpeg(b: Uint8Array): { width: number; height: number; orientation: numb
   throw new Error('a JPEG without a frame header')
 }
 
+export interface RiffChunk {
+  type: string
+  /** Offset of the chunk header. */
+  at: number
+  /** Offset just past the chunk, padding included (never beyond the file). */
+  end: number
+  data: Uint8Array
+}
+
+/**
+ * The chunks of a WebP (RIFF) file after its 12-byte header. Sizes are unsigned
+ * 32-bit little-endian; a chunk that does not fit in the file ends the walk, so
+ * a corrupt size can neither run backwards nor allocate beyond the file.
+ */
+export function riffChunks(b: Uint8Array): RiffChunk[] {
+  const out: RiffChunk[] = []
+  for (let at = 12; at + 8 <= b.length; ) {
+    const size = (b[at + 4]! | (b[at + 5]! << 8) | (b[at + 6]! << 16)) + b[at + 7]! * 2 ** 24
+    if (at + 8 + size > b.length) break
+    const end = Math.min(b.length, at + 8 + size + (size & 1))
+    out.push({ type: ascii(b, at, 4), at, end, data: b.subarray(at + 8, at + 8 + size) })
+    at = end
+  }
+  return out
+}
+
 function webp(b: Uint8Array): { width: number; height: number; orientation?: number } {
   const chunk = ascii(b, 12, 4)
   const d = 20
@@ -128,13 +154,8 @@ function webp(b: Uint8Array): { width: number; height: number; orientation?: num
     const width = u24le(b, d + 4) + 1
     const height = u24le(b, d + 7) + 1
     let orientation = 1
-    for (let at = 12; at + 8 <= b.length; ) {
-      const size = b[at + 4]! | (b[at + 5]! << 8) | (b[at + 6]! << 16) | (b[at + 7]! * 2 ** 24)
-      if (ascii(b, at, 4) === 'EXIF') {
-        const tiff = b.subarray(at + 8, at + 8 + size)
-        orientation = exifOrientation(ascii(tiff, 0, 6) === 'Exif\0\0' ? tiff.subarray(6) : tiff)
-      }
-      at += 8 + size + (size & 1)
+    for (const c of riffChunks(b)) {
+      if (c.type === 'EXIF') orientation = exifOrientation(ascii(c.data, 0, 6) === 'Exif\0\0' ? c.data.subarray(6) : c.data)
     }
     if (orientation === 1) return { width, height }
     return orientation >= 5 ? { width: height, height: width, orientation } : { width, height, orientation }

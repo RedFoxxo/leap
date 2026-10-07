@@ -1,4 +1,4 @@
-import { exifOrientation, type MediaMime } from './inspect.js'
+import { exifOrientation, riffChunks, type MediaMime } from './inspect.js'
 
 /**
  * Removes metadata from a still image without touching its pixels: EXIF (GPS
@@ -131,14 +131,9 @@ function stripWebp(b: Uint8Array): Uint8Array {
   if (ascii(b, 12, 4) !== 'VP8X') return b
   const parts: Uint8Array[] = []
   let orientation = 1
-  let at = 12
-  while (at + 8 <= b.length) {
-    const size = b[at + 4]! | (b[at + 5]! << 8) | (b[at + 6]! << 16) | (b[at + 7]! * 2 ** 24)
-    const type = ascii(b, at, 4)
-    const end = Math.min(b.length, at + 8 + size + (size & 1))
-    if (type === 'EXIF') orientation = exifOrientation(webpExifTiff(b.subarray(at + 8, at + 8 + size)))
-    if (type !== 'EXIF' && type !== 'XMP ') parts.push(b.subarray(at, end))
-    at = end
+  for (const c of riffChunks(b)) {
+    if (c.type === 'EXIF') orientation = exifOrientation(webpExifTiff(c.data))
+    if (c.type !== 'EXIF' && c.type !== 'XMP ') parts.push(b.subarray(c.at, c.end))
   }
   if (orientation > 1) {
     // The TIFF part of the minimal EXIF block (without "Exif\0\0"); 26 bytes, so no padding.

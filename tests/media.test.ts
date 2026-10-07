@@ -40,6 +40,17 @@ describe('inspect', () => {
     expect(TELEMETRY_CODECS.has('gpmd') && TELEMETRY_CODECS.has('camm')).toBe(true)
   })
 
+  it('stops at a WebP chunk whose size has the top bit set, instead of walking backwards', () => {
+    const webp = new Uint8Array(file('exif.webp'))
+    // The first chunk after VP8X claims 0x80000010 bytes: as a signed 32-bit number that is negative.
+    const second = 12 + 8 + 10
+    webp.set([0x10, 0x00, 0x00, 0x80], second + 4)
+    const started = performance.now()
+    expect(inspect(webp)).toMatchObject({ mime: 'image/webp' })
+    expect(stripMetadata(webp, 'image/webp').length).toBeLessThanOrEqual(webp.length)
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
   it('refuses anything else', () => {
     expect(sniff(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>'))).toBeUndefined()
     expect(() => inspect(new TextEncoder().encode('%PDF-1.7'))).toThrow(/not a photo or video openGym accepts/)
