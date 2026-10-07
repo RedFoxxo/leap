@@ -46,30 +46,62 @@ export function orientationExif(orientation: number): Uint8Array {
   return new Uint8Array([0xff, 0xe1, len >> 8, len & 0xff, ...payload])
 }
 
+/** Where the entropy-coded data after a scan header ends: the next marker that is not stuffing (FF00), a restart (FFD0–D7) or fill. */
+function scanEnd(b: Uint8Array, from: number): number {
+  for (let i = from; i + 1 < b.length; i++) {
+    if (b[i] !== 0xff) continue
+    const next = b[i + 1]!
+    if (next === 0x00 || next === 0xff || (next >= 0xd0 && next <= 0xd7)) continue
+    return i
+  }
+  return b.length
+}
+
+/**
+ * Walks every segment and every scan (a progressive JPEG has several) up to the
+ * end-of-image marker, and drops what follows it: a motion photo's video,
+ * further images with their own metadata, vendor trailers.
+ */
 function stripJpeg(b: Uint8Array): Uint8Array {
   const jfif: Uint8Array[] = []
   const kept: Uint8Array[] = []
   let at = 2
   let orientation = 1
-  while (at + 4 <= b.length && b[at] === 0xff) {
+  while (at + 2 <= b.length && b[at] === 0xff) {
     const marker = b[at + 1]!
     if (marker === 0xff) {
       at++
       continue
     }
-    if (marker === 0xda) break
+    if (marker === 0xd9) {
+      kept.push(b.subarray(at, at + 2))
+      break
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      kept.push(b.subarray(at, at + 2))
+      at += 2
+      continue
+    }
+    if (at + 4 > b.length) break
     const len = (b[at + 2]! << 8) | b[at + 3]!
-    const seg = b.subarray(at, at + 2 + len)
+    const end = Math.min(b.length, at + 2 + len)
+    if (marker === 0xda) {
+      const data = scanEnd(b, end)
+      kept.push(b.subarray(at, data))
+      at = data
+      continue
+    }
+    const seg = b.subarray(at, end)
     const isApp = marker >= 0xe0 && marker <= 0xef
-    if (marker === 0xe1 && ascii(b, at + 4, 6) === 'Exif\0\0') orientation = exifOrientation(b.subarray(at + 10, at + 2 + len))
+    if (marker === 0xe1 && ascii(b, at + 4, 6) === 'Exif\0\0') orientation = exifOrientation(b.subarray(at + 10, end))
     if (marker === 0xe0 && (ascii(b, at + 4, 5) === 'JFIF\0' || ascii(b, at + 4, 5) === 'JFXX\0')) jfif.push(seg)
     else if ((marker === 0xe2 && ascii(b, at + 4, 12) === 'ICC_PROFILE\0') || (marker === 0xee && ascii(b, at + 4, 5) === 'Adobe') || (!isApp && marker !== 0xfe)) {
       kept.push(seg)
     }
-    at += 2 + len
+    at = end
   }
-  // Start of image, the JFIF header, the orientation where EXIF belongs, then everything kept and the scan.
-  return concat([b.subarray(0, 2), ...jfif, ...(orientation > 1 ? [orientationExif(orientation)] : []), ...kept, b.subarray(at)])
+  // Start of image, the JFIF header, the orientation where EXIF belongs, then the kept segments and scans up to the end of the image.
+  return concat([b.subarray(0, 2), ...jfif, ...(orientation > 1 ? [orientationExif(orientation)] : []), ...kept])
 }
 
 /** Chunks a PNG needs to look the same (image data, colour, transparency, animation); text, EXIF and time go. */

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { exifOrientation, inspect, sniff } from '../src/media/inspect.js'
+import { exifOrientation, inspect, locationIn, sniff, TELEMETRY_CODECS } from '../src/media/inspect.js'
 import { orientationExif, stripMetadata } from '../src/media/strip.js'
 
 /**
@@ -30,6 +30,14 @@ describe('inspect', () => {
     expect(inspect(file('clip.webm'))).toEqual({ mime: 'video/webm', kind: 'video', width: 20, height: 12, dur: 2, codec: 'vp9' })
     expect(inspect(file('located.mov'))).toMatchObject({ dur: 1.5, hasLocation: true })
     expect(inspect(file('located.mp4'))).toMatchObject({ dur: 1.5, hasLocation: true })
+    expect(inspect(file('gps-uuid.mp4'))).toMatchObject({ hasLocation: true })
+  })
+
+  it('finds 3GPP locations and GPS telemetry tracks', () => {
+    expect(locationIn(new TextEncoder().encode('....loci....'))).toBe(true)
+    expect(locationIn(new TextEncoder().encode('...<exif:GPSLatitude>...'))).toBe(true)
+    expect(locationIn(new TextEncoder().encode('an ordinary movie header'))).toBe(false)
+    expect(TELEMETRY_CODECS.has('gpmd') && TELEMETRY_CODECS.has('camm')).toBe(true)
   })
 
   it('refuses anything else', () => {
@@ -49,6 +57,21 @@ describe('stripMetadata', () => {
     expect(has(after, 'ICC_PROFILE')).toBe(true)
     expect(inspect(after)).toEqual(inspect(before))
     expect(after.length).toBeLessThan(before.length)
+  })
+
+  it('drops everything after the end of the image (motion photos, extra images, trailers)', () => {
+    const before = file('trailer.jpg')
+    expect(has(before, 'TRAILER-GPS')).toBe(true)
+    const after = stripMetadata(before, 'image/jpeg')
+    expect(has(after, 'TRAILER-GPS')).toBe(false)
+    expect(has(after, 'secret-second-image')).toBe(false)
+    expect([...after.subarray(-2)]).toEqual([0xff, 0xd9])
+    expect(after).toEqual(file('plain.jpg'))
+  })
+
+  it('keeps every scan of a progressive JPEG', () => {
+    const progressive = file('progressive.jpg')
+    expect(stripMetadata(progressive, 'image/jpeg')).toEqual(progressive)
   })
 
   it('leaves a JPEG without metadata byte for byte', () => {

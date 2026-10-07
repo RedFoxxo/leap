@@ -81,7 +81,7 @@ function capProblem(p: Prepared, caps: MediaCaps): string | undefined {
 export const writeAttachMedia = defineTool({
   name: 'write_attach_media',
   description:
-    'Upload a photo or video from this computer and attach it to a logged workout (up to 6) or to a custom exercise (one; replaces the old one). `path` is an absolute local path (~/ allowed). Only JPEG, PNG, WebP, GIF, MP4, MOV and WebM files are read. Photos lose their metadata first (location, camera, time; the orientation stays); a video that records a location is refused. Files are not resized: check the limits with read_media_usage.',
+    'Upload a photo or video from this computer and attach it to a logged workout (up to 6) or to a custom exercise (one; replaces the old one). `path` is an absolute local path (~/ allowed). Only JPEG, PNG, WebP, GIF, MP4, MOV and WebM files are read. Photos lose their metadata first (location, camera, time, and anything appended after the image such as a motion-photo video; the orientation stays). A video is refused when it carries location data leap recognises (QuickTime and 3GPP location, Apple location keys, EXIF/XMP GPS tags, GoPro or Google GPS tracks); other vendor formats are not detected. Files are not resized: check the limits with read_media_usage.',
   input: {
     path: z.string().min(1).max(4096),
     workoutId: entryId.optional(),

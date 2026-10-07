@@ -271,7 +271,10 @@ differ from the app's.
   2 MB by default). The app re-encodes photos to fit and removes metadata; the
   server never alters a file. leap cannot re-encode: it removes metadata from
   stills without touching pixels (keeping the orientation as a minimal EXIF
-  block in JPEG and WebP), refuses videos that record a location, and reports
+  block in JPEG and WebP, and dropping whatever follows a JPEG's end-of-image
+  marker), refuses videos with location data it recognises (`©xyz`, `loci`,
+  Apple location keys, EXIF/XMP GPS tags in metadata boxes, `gpmd`/`camm`
+  telemetry tracks), and reports
   files over the cap. **Verified**: stripped fixtures decode to identical
   pixels (Pillow, EXIF rotation applied); the real API accepted stripped JPEG,
   GIF and an MP4.

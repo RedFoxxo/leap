@@ -179,7 +179,8 @@ const child = (b: Uint8Array, box: Box, type: string) => boxes(b, box.start, box
 const CODEC_FOURCC: Record<string, Codec> = { avc1: 'avc1', avc3: 'avc1', hvc1: 'hvc1', hev1: 'hvc1', av01: 'av01', vp09: 'vp09', vp08: 'vp8' }
 
 function isoBmff(b: Uint8Array): { width: number; height: number; dur?: number; codec: Codec; hasLocation: boolean } {
-  const moov = boxes(b, 0, b.length).find((x) => x.type === 'moov')
+  const top = boxes(b, 0, b.length)
+  const moov = top.find((x) => x.type === 'moov')
   if (!moov) throw new Error('a video without a movie header (moov)')
   let dur: number | undefined
   const mvhd = child(b, moov, 'mvhd')
@@ -203,21 +204,44 @@ function isoBmff(b: Uint8Array): { width: number; height: number; dur?: number; 
       return stbl && child(b, stbl, 'stsd')
     })()
     const fourcc = stsd && stsd.start + 16 <= stsd.end ? ascii(b, stsd.start + 12, 4) : ''
-    return { width, height, ...(dur !== undefined ? { dur } : {}), codec: CODEC_FOURCC[fourcc] ?? 'other', hasLocation: hasLocation(b.subarray(moov.start, moov.end)) }
+    return { width, height, ...(dur !== undefined ? { dur } : {}), codec: CODEC_FOURCC[fourcc] ?? 'other', hasLocation: hasLocation(b, top, moov) }
   }
   throw new Error('a video without a video track')
 }
 
-/** QuickTime/MP4 location metadata: the `©xyz` atom or Apple's `com.apple.quicktime.location.*` keys. */
-function hasLocation(moov: Uint8Array): boolean {
-  const needle = (bytes: number[]) => {
-    outer: for (let i = 0; i + bytes.length <= moov.length; i++) {
-      for (let j = 0; j < bytes.length; j++) if (moov[i + j] !== bytes[j]) continue outer
+/** Sample formats of tracks that record position: GoPro's GPMF telemetry and Google's camera motion metadata. */
+export const TELEMETRY_CODECS: ReadonlySet<string> = new Set(['gpmd', 'camm'])
+
+const bytesOf = (s: string) => [...s].map((c) => c.charCodeAt(0))
+/**
+ * Location metadata as cameras and phones write it: QuickTime `©xyz`, the 3GPP
+ * `loci` box, Apple's `com.apple.quicktime.location.*` keys, and EXIF/XMP GPS tags
+ * that some vendors embed in metadata boxes.
+ */
+const LOCATION_NEEDLES = [[0xa9, 0x78, 0x79, 0x7a], bytesOf('loci'), bytesOf('com.apple.quicktime.location'), bytesOf('GPSCoordinates'), bytesOf('GPSLatitude')]
+
+export function locationIn(area: Uint8Array): boolean {
+  return LOCATION_NEEDLES.some((bytes) => {
+    outer: for (let i = 0; i + bytes.length <= area.length; i++) {
+      for (let j = 0; j < bytes.length; j++) if (area[i + j] !== bytes[j]) continue outer
       return true
     }
     return false
+  })
+}
+
+/** The movie header and the top-level metadata boxes (not the media data) carry any location. */
+function hasLocation(b: Uint8Array, top: Box[], moov: Box): boolean {
+  if (locationIn(b.subarray(moov.start, moov.end))) return true
+  if (top.some((x) => (x.type === 'uuid' || x.type === 'meta' || x.type === 'udta') && locationIn(b.subarray(x.start, x.end)))) return true
+  for (const trak of boxes(b, moov.start, moov.end).filter((x) => x.type === 'trak')) {
+    const mdia = child(b, trak, 'mdia')
+    const minf = mdia && child(b, mdia, 'minf')
+    const stbl = minf && child(b, minf, 'stbl')
+    const stsd = stbl && child(b, stbl, 'stsd')
+    if (stsd && stsd.start + 16 <= stsd.end && TELEMETRY_CODECS.has(ascii(b, stsd.start + 12, 4))) return true
   }
-  return needle([0xa9, 0x78, 0x79, 0x7a]) || needle([...'com.apple.quicktime.location'].map((c) => c.charCodeAt(0)))
+  return false
 }
 
 /** An EBML variable-length integer: its length, and its value without (size) or with (id) the marker bits. */
