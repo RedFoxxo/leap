@@ -41,6 +41,17 @@ Work in progress (0.1.0, unreleased). See [CHANGELOG.md](CHANGELOG.md).
 Keep the token out of config files: export it in your shell profile
 (`export OPENGYM_TOKEN=...`) and let the client pass it through.
 
+## Network and files
+
+- leap talks to your instance only. The one exception: the names, muscles and
+  instructions of openGym's built-in exercises are not served by the openGym
+  API, so leap downloads them once from the MIT
+  [exercise dataset](https://github.com/hasaneyldrm/exercises-dataset) openGym
+  itself uses (a pinned version, hash-checked, about 17 MB) and caches a small
+  copy in `~/.cache/leap`. No token or profile data is sent there.
+- Before every write, leap saves a copy of your profile in
+  `~/.local/state/leap/backups/<instance>` (the newest 50, readable only by you).
+
 ## opencode
 
 ```json
@@ -76,7 +87,7 @@ Keep the token out of config files: export it in your shell profile
 
 ## Tools
 
-**read**: `read_me`, `read_instance`
+**read**: `read_me`, `read_instance`, `read_exercises`, `read_exercise`
 
 More tools are on the way; see [CLAUDE.md](CLAUDE.md) for the plan.
 

@@ -45,6 +45,11 @@ export const MAP_KEYS = [
   'enOnly',
 ] as const
 
+/** The profile's weight unit; every stored weight is in it. The app defaults to kg. */
+export function unitOf(state: State | null | undefined): 'kg' | 'lb' {
+  return state?.unit === 'lb' ? 'lb' : 'kg'
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

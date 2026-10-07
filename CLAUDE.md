@@ -45,6 +45,12 @@ Versions are pinned exactly. Before every commit run `npm run typecheck`,
 That is the complete list. Fail at startup with a clear message if a required
 variable is missing.
 
+Besides `OPENGYM_URL`, leap contacts exactly one other host: once per
+dataset version it downloads the exercise catalogue from
+`raw.githubusercontent.com` (pinned commit, hash-checked, never with the
+token) and caches it under `$XDG_CACHE_HOME/leap`. Offline, tools show ids
+instead of built-in names and say so.
+
 ## Authentication
 
 - openGym signs in with passkeys (WebAuthn), which an MCP server cannot do.
@@ -71,6 +77,9 @@ src/
     core.ts            the one request function: Bearer token, User-Agent, stderr log, Result
     result.ts          Result<T> = { ok: true, status, data } | { ok: false, status, message, code?, retryAfter?, body }
     redact.ts          token redaction (configured token and every "token" field in bodies)
+  catalog/
+    exercises.ts       built-in exercises (pinned upstream MIT dataset, hash-checked, cached),
+                       custom exercises from the profile, ExerciseIndex (names, favourites, notes)
   state/
     types.ts           the loosely typed profile document, list/map accessors
     store.ts           load, and update(): the one write path (see "Writing the profile")
@@ -79,6 +88,7 @@ src/
   tools/
     types.ts, context.ts, respond.ts, index.ts
     account/           read_me, read_instance
+    exercises/         read_exercises, read_exercise
 docs/OPENGYM.md        what leap relies on in openGym: document, sync, shapes, with sources
 scripts/test-server.mjs  throwaway openGym API in Docker for live tests
 tests/                 contract tests (tools/), helpers (fetch stub, MCP harness, stateful
@@ -151,12 +161,11 @@ Rules for mutate functions:
 ## Status and remaining work
 
 Done: scaffold, HTTP layer, pairing, `read_me`, `read_instance`, the state
-layer (verified live, including a real 409 from a second writer).
+layer (verified live, including a real 409 from a second writer), the exercise
+catalogue with `read_exercises` and `read_exercise` (verified live).
 
 Planned, in order:
 
-1. Exercise names: built-in catalogue from the upstream MIT dataset at runtime
-   (cached), plus the profile's custom exercises.
-2. Read tools for training data and stats.
+1. Read tools for training data and stats.
 3. Write and delete tools for training data and settings.
 4. Media, Coach, account, admin.

@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import { BuiltinCatalogProvider } from '../../src/catalog/exercises.js'
 import { loadConfig } from '../../src/config.js'
 import { createServer } from '../../src/server.js'
 import { fileBackups } from '../../src/state/backup.js'
@@ -15,7 +16,10 @@ export interface LiveResult {
 
 /** The real server against the instance in OPENGYM_URL, over an in-memory MCP transport. */
 export async function liveClient(): Promise<{ call: (name: string, args?: Record<string, unknown>) => Promise<LiveResult>; close: () => Promise<void> }> {
-  const server = createServer(createContext(loadConfig(), { backup: fileBackups('.cache/test-server/backups') }))
+  const catalog = new BuiltinCatalogProvider({ cacheFile: '.cache/live-exercises.json' })
+  const server = createServer(
+    createContext(loadConfig(), { backup: fileBackups('.cache/test-server/backups'), builtinExercises: () => catalog.get() }),
+  )
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)
   const client = new Client({ name: 'live', version: '0' })

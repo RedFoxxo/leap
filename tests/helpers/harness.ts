@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { Config } from '../../src/config.js'
 import { createServer } from '../../src/server.js'
 import { createContext, type ContextOptions, type ToolContext } from '../../src/tools/context.js'
+import { fixtureCatalog } from '../fixtures/exercises.js'
 import { FetchStub } from './fetch-stub.js'
 
 export const BASE = 'https://gym.example'
@@ -32,7 +33,12 @@ export async function harness(
 ): Promise<Harness> {
   const stub = options.stub ?? new FetchStub()
   const config: Config = { baseUrl: BASE, token: TOKEN, ...options.config }
-  const ctx = createContext(config, { backup: null, ...options.context, fetch: stub.fetch })
+  const ctx = createContext(config, {
+    backup: null,
+    builtinExercises: async () => fixtureCatalog(),
+    ...options.context,
+    fetch: stub.fetch,
+  })
   const server = createServer(ctx)
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await server.connect(serverTransport)

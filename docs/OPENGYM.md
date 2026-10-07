@@ -170,6 +170,16 @@ translations are AGPL. The images and GIFs are third-party content licensed to
 nobody downstream. leap does **not** bundle any of it; names are looked up from
 the upstream MIT dataset at runtime.
 
+The upstream dataset (`data/exercises.json`, pinned at commit `7455efae`,
+SHA-256 `65663422…`) has the same 1,324 ids as openGym's catalogue, with the
+same names except four where upstream mis-encodes "°" as "в°" (`0738`, `0739`,
+`0740`, `1464`), and the same targets (**verified** by comparing both files).
+Its fields: `name`, `body_part`, `equipment`, `target`, `muscle_group`,
+`secondary_muscles`, `instruction_steps` per language. openGym's own muscle
+mapping for Stats (`exercise-muscle-*.json`) is AGPL and not used by leap, so
+leap's muscle figures are based on `target` and `secondary_muscles` and can
+differ from the app's.
+
 ## Stats
 
 (**source**: `frontend/src/lib/onerm.js`, `muscles.js`, `progression.js`)
