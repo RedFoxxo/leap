@@ -34,9 +34,9 @@ describe.runIf(LIVE)('account and admin (live)', () => {
     expect(second).toMatchObject({ disabled: false })
 
     expect((await c.call('admin_disable_user', { id, disabled: true })).isError).toBe(false)
-    expect((await c.call('admin_user', { id })).json.user.disabled).toBe(true)
+    expect((await c.call('admin_user', { id })).json).toMatchObject({ user: { disabled: true }, counts: { workouts: 0 } })
     expect((await c.call('admin_disable_user', { id, disabled: false })).isError).toBe(false)
-    expect((await c.call('admin_password_reset', { id })).json).toMatchObject({ code: expect.any(String) })
+    expect((await c.call('admin_password_reset', { id, confirm: true })).json).toMatchObject({ code: expect.any(String) })
 
     expect((await c.call('admin_delete_user', { id, confirmName: 'Somebody else' })).text).toMatch(/nothing was deleted/)
     expect((await c.call('admin_delete_user', { id, confirmName: second.name })).json.deleted.id).toBe(id)

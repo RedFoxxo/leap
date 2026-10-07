@@ -19,7 +19,8 @@ function adminFailure(summary: string, e: Err) {
 
 export const adminUsers = defineTool({
   name: 'admin_users',
-  description: 'Admin: every profile on the instance with its id, name, admin and disabled flags, passkeys, password, last sign-in and training activity.',
+  description:
+    'Admin: every profile on the instance: id, name, created, admin and disabled flags, who invited it, number of workouts and the last one, last sync, whether it has a password, an e-mail and push, and whether a workout is live now.',
   input: {},
   async handler(_args, ctx) {
     const r = await ctx.http.request({ method: 'GET', path: '/api/admin/users' })
@@ -27,13 +28,39 @@ export const adminUsers = defineTool({
   },
 })
 
+interface AdminUserExport {
+  user?: Record<string, unknown>
+  unit?: string
+  lastSync?: unknown
+  routines?: unknown[]
+  bodyweight?: { d?: string; w?: number }[]
+  workouts?: { id?: string; d?: string; name?: string; vol?: number; entries?: unknown[] }[]
+}
+
 export const adminUser = defineTool({
   name: 'admin_user',
-  description: 'Admin: one profile in detail (sign-in methods, activity, recent workouts as the admin dashboard shows them).',
-  input: { id: userId },
+  description:
+    'Admin: one profile in detail: its account record, unit, last sync, how many workouts, routines and weigh-ins it has, the latest weigh-in, and its most recent workouts (default 10, newest first). openGym answers with the whole profile; leap summarises it.',
+  input: { id: userId, workouts: z.number().int().min(0).max(200).optional().describe('How many recent workouts (default 10)') },
   async handler(args, ctx) {
-    const r = await ctx.http.request({ method: 'GET', path: '/api/admin/user', query: { id: args.id } })
-    return r.ok ? success(r.data) : adminFailure('Could not read the user', r)
+    const r = await ctx.http.request<AdminUserExport>({ method: 'GET', path: '/api/admin/user', query: { id: args.id } })
+    if (!r.ok) return adminFailure('Could not read the user', r)
+    const workouts = Array.isArray(r.data?.workouts) ? r.data.workouts : []
+    const weighIns = (Array.isArray(r.data?.bodyweight) ? r.data.bodyweight : []).filter((e) => typeof e?.d === 'string').sort((a, b) => String(a.d).localeCompare(String(b.d)))
+    const max = args.workouts ?? 10
+    const latest = weighIns.at(-1)
+    return success({
+      user: r.data?.user ?? null,
+      unit: r.data?.unit ?? 'kg',
+      lastSync: r.data?.lastSync ?? null,
+      counts: { workouts: workouts.length, routines: Array.isArray(r.data?.routines) ? r.data.routines.length : 0, weighIns: weighIns.length },
+      ...(latest ? { latestWeighIn: { date: latest.d, weight: latest.w } } : {}),
+      recentWorkouts: workouts
+        .slice(-max)
+        .reverse()
+        .map((w) => ({ id: w.id, date: w.d, name: w.name, volume: w.vol, exercises: Array.isArray(w.entries) ? w.entries.length : 0 })),
+      ...(workouts.length > max ? { truncated: true } : {}),
+    })
   },
 })
 
@@ -53,16 +80,17 @@ export const adminDeleteUser = defineTool({
     'Admin: delete a profile and everything of it (training data, photos, passkeys) for good. `confirmName` must be the profile\'s name, as a check against a wrong id. A profile cannot delete itself here.',
   input: { id: userId, confirmName: z.string().min(1).max(80) },
   async handler(args, ctx) {
-    const [me, user] = await Promise.all([
+    const [me, users] = await Promise.all([
       ctx.http.request<{ user: { id: string } }>({ method: 'GET', path: '/api/me' }),
-      ctx.http.request<{ user?: { name?: string }; name?: string }>({ method: 'GET', path: '/api/admin/user', query: { id: args.id } }),
+      ctx.http.request<{ users?: { id?: string; name?: string }[] }>({ method: 'GET', path: '/api/admin/users' }),
     ])
     if (!me.ok) return failure('Could not read the signed-in profile', me)
-    if (me.data.user.id === args.id) return invalid('this is your own profile; it is not deleted from here')
-    if (!user.ok) return adminFailure('Could not read the user', user)
-    const name = user.data.user?.name ?? user.data.name
-    if (typeof name !== 'string' || name.trim().toLowerCase() !== args.confirmName.trim().toLowerCase()) {
-      return invalid(`confirmName does not match the profile's name${typeof name === 'string' ? ` ("${name}")` : ''}; nothing was deleted`)
+    if (me.data?.user?.id === args.id) return invalid('this is your own profile; it is not deleted from here')
+    if (!users.ok) return adminFailure('Could not list the users', users)
+    const name = (Array.isArray(users.data?.users) ? users.data.users : []).find((u) => u?.id === args.id)?.name
+    if (typeof name !== 'string') return invalid(`no profile with id "${args.id}"; nothing was deleted`)
+    if (name.trim().toLowerCase() !== args.confirmName.trim().toLowerCase()) {
+      return invalid(`confirmName does not match the profile's name ("${name}"); nothing was deleted`)
     }
     const r = await ctx.http.request({ method: 'POST', path: '/api/admin/user/delete', json: { id: args.id } })
     return r.ok ? success({ deleted: { id: args.id, name } }) : adminFailure('Could not delete the user', r)
@@ -71,11 +99,12 @@ export const adminDeleteUser = defineTool({
 
 export const adminPasswordReset = defineTool({
   name: 'admin_password_reset',
-  description: 'Admin: issue a one-time code with which a profile sets a new password (password sign-in must be on). Give the code to that person only.',
-  input: { id: userId },
+  description:
+    'Admin: reset a profile\'s password (password sign-in must be on; admins are refused). At once, openGym deletes its current password, signs it out on every device and drops its pairings and device links; the answer is a one-time code with which that person sets a new password. Give the code to that person only.',
+  input: { id: userId, confirm: z.literal(true).describe('Must be true: the profile is signed out everywhere at once') },
   async handler(args, ctx) {
     const r = await ctx.http.request({ method: 'POST', path: '/api/admin/user/password-reset', json: { id: args.id } })
-    return r.ok ? success(r.data) : adminFailure('Could not issue a reset code', r)
+    return r.ok ? success(r.data) : adminFailure('Could not reset the password', r)
   },
 })
 
@@ -157,12 +186,18 @@ export const adminCoachConfig = defineTool({
       .object({ perProfileDaily: z.number().int().min(0).max(200).optional(), instanceDaily: z.number().int().min(0).max(5000).optional() })
       .strict()
       .optional()
-      .describe('Daily job limits; 0 = no cap'),
+      .describe('Daily job limits; 0 = no cap. A limit not given stays as it is'),
     maxMessageLen: z.number().int().min(200).max(4000).optional(),
   },
   async handler(args, ctx) {
-    const body = Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined))
+    const body: Record<string, unknown> = Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined))
     if (!Object.keys(body).length) return invalid('nothing to change')
+    if (args.caps) {
+      // openGym rebuilds both limits from what is sent and turns a missing one into 0, "no limit".
+      const card = await ctx.http.request<{ caps?: { perProfileDaily?: number; instanceDaily?: number } }>({ method: 'GET', path: '/api/admin/coach' })
+      if (!card.ok) return adminFailure('Could not read the current Coach limits', card)
+      body.caps = { perProfileDaily: card.data?.caps?.perProfileDaily ?? 0, instanceDaily: card.data?.caps?.instanceDaily ?? 0, ...args.caps }
+    }
     const r = await ctx.http.request({ method: 'POST', path: '/api/admin/coach/config', json: body })
     return r.ok ? success({ changed: body }) : adminFailure('Could not change the Coach settings', r)
   },

@@ -57,24 +57,67 @@ describe('admin', () => {
   it('deletes a user only when the name matches, and never the caller', async () => {
     const stub = new FetchStub()
       .get('/api/me', ME)
-      .get('/api/admin/user', (c: { query: URLSearchParams }) => ({ user: { id: c.query.get('id'), name: c.query.get('id') === 'me000000' ? 'Foxxo' : 'Alex' } }))
+      .get('/api/admin/users', { users: [{ id: 'me000000', name: 'Foxxo' }, { id: 'alex0000', name: 'Alex' }] })
       .post('/api/admin/user/delete', { ok: true, id: 'alex0000' })
     const h = await harness({ stub })
     expect((await h.call('admin_delete_user', { id: 'alex0000', confirmName: 'Bob' })).text).toMatch(/does not match the profile's name \("Alex"\); nothing was deleted/)
     expect((await h.call('admin_delete_user', { id: 'me000000', confirmName: 'Foxxo' })).text).toMatch(/your own profile/)
+    expect((await h.call('admin_delete_user', { id: 'nobody00', confirmName: 'X' })).text).toMatch(/no profile with id/)
     expect(stub.find('POST', '/api/admin/user/delete')).toHaveLength(0)
     expect((await h.call('admin_delete_user', { id: 'alex0000', confirmName: ' alex ' })).json).toEqual({ deleted: { id: 'alex0000', name: 'Alex' } })
     await h.close()
   })
 
   it('sends only the Coach settings given, and needs a confirm to clear the log', async () => {
-    const stub = new FetchStub().post('/api/admin/coach/config', { ok: true }).post('/api/admin/audit/clear', { ok: true })
+    const stub = new FetchStub().get('/api/admin/coach', { caps: { perProfileDaily: 10, instanceDaily: 0 } }).post('/api/admin/coach/config', { ok: true }).post('/api/admin/audit/clear', { ok: true })
     const h = await harness({ stub })
-    expect((await h.call('admin_coach_config', { enabled: false, caps: { perProfileDaily: 5 } })).json).toEqual({ changed: { enabled: false, caps: { perProfileDaily: 5 } } })
-    expect(stub.find('POST', '/api/admin/coach/config')[0]!.body).toEqual({ enabled: false, caps: { perProfileDaily: 5 } })
+    expect((await h.call('admin_coach_config', { enabled: false, caps: { perProfileDaily: 5 } })).json).toEqual({ changed: { enabled: false, caps: { perProfileDaily: 5, instanceDaily: 0 } } })
+    expect(stub.find('POST', '/api/admin/coach/config')[0]!.body).toEqual({ enabled: false, caps: { perProfileDaily: 5, instanceDaily: 0 } })
     expect((await h.call('admin_coach_config', {})).text).toMatch(/nothing to change/)
     expect((await h.call('admin_clear_audit', {})).isError).toBe(true)
     expect(stub.find('POST', '/api/admin/audit/clear')).toHaveLength(0)
+    await h.close()
+  })
+
+  it('keeps the other Coach limit when changing one (the server resets a missing one to "no limit")', async () => {
+    const stub = new FetchStub().get('/api/admin/coach', { enabled: true, caps: { perProfileDaily: 10, instanceDaily: 300 } }).post('/api/admin/coach/config', { ok: true })
+    const h = await harness({ stub })
+    await h.call('admin_coach_config', { caps: { perProfileDaily: 5 } })
+    expect(stub.find('POST', '/api/admin/coach/config')[0]!.body).toEqual({ caps: { perProfileDaily: 5, instanceDaily: 300 } })
+    await h.close()
+  })
+
+  it('summarises a profile instead of returning its whole history', async () => {
+    const workouts = Array.from({ length: 40 }, (_, i) => ({ id: `w${i}`, d: `2026-09-${String((i % 28) + 1).padStart(2, '0')}`, name: 'Push', vol: 100 + i, entries: [{ id: '0025', sets: [] }] }))
+    const stub = new FetchStub().get('/api/admin/user', {
+      user: { id: 'alex0000', name: 'Alex', disabled: false, admin: false },
+      unit: 'kg',
+      lastSync: 5,
+      routines: [{ id: 'r1', name: 'A', ex: [] }],
+      bodyweight: [{ d: '2026-09-01', w: 80 }, { d: '2026-09-20', w: 79 }],
+      workouts,
+    })
+    const h = await harness({ stub })
+    const r = await h.call('admin_user', { id: 'alex0000' })
+    expect(r.json).toMatchObject({ user: { name: 'Alex' }, unit: 'kg', counts: { workouts: 40, routines: 1, weighIns: 2 }, latestWeighIn: { date: '2026-09-20', weight: 79 }, truncated: true })
+    expect(r.json.recentWorkouts).toHaveLength(10)
+    expect(r.json.recentWorkouts[0]).toEqual({ id: 'w39', date: '2026-09-12', name: 'Push', volume: 139, exercises: 1 })
+    expect(r.text.length).toBeLessThan(3000)
+    await h.close()
+  })
+
+  it('looks a profile’s name up in the user list before deleting, and needs a confirm for password resets', async () => {
+    const stub = new FetchStub()
+      .get('/api/me', ME)
+      .get('/api/admin/users', { users: [{ id: 'alex0000', name: 'Alex' }] })
+      .post('/api/admin/user/delete', { ok: true })
+      .post('/api/admin/user/password-reset', { ok: true, name: 'Alex', code: 'abc', expires: 1 })
+    const h = await harness({ stub })
+    expect((await h.call('admin_delete_user', { id: 'alex0000', confirmName: 'Alex' })).isError).toBe(false)
+    expect(stub.find('GET', '/api/admin/user')).toHaveLength(0)
+    expect((await h.call('admin_password_reset', { id: 'alex0000' })).isError).toBe(true)
+    expect(stub.find('POST', '/api/admin/user/password-reset')).toHaveLength(0)
+    expect((await h.call('admin_password_reset', { id: 'alex0000', confirm: true })).json.code).toBe('abc')
     await h.close()
   })
 
