@@ -173,6 +173,22 @@ routine editor, `lib/plan-share.js`)
 `{ id: "c…", n: name, bp: body part, eq: equipment, tg: target, primaries,
 secondaries, sm, muscleGroups, desc, custom: true, media?, url?, _ts }`.
 
+Custom exercises store muscles in the app's body-map vocabulary (`trapezius`,
+`deltoids`, `chest`, `upper-back`, `serratus`, `biceps`, `triceps`, `forearm`,
+`abs`, `obliques`, `lower-back`, `gluteal`, `quadriceps`, `hamstring`,
+`adductors`, `hip-flexors`, `calves`, `tibialis`), in that order; a cardio
+exercise's only primary is `cardiovascular system`. `tg` is one of the
+primaries, `sm` mirrors `secondaries`, `muscleGroups` is both lists. Names are
+unique among all exercises (case-insensitive). (**source**: `sheets.jsx`
+`CustomExForm`, `lib/muscles.js`)
+
+Deleting one (**source**: `sheets.jsx` `deleteCustomEx`): every logged entry
+of it gets `n` (its name) and, if it has none, a `muscleSnapshot`; it is
+removed from `customEx`, from every routine (superset ids left without a
+neighbour are dropped), from `exWeights` and `favEx`. The app's snapshot also
+holds `muscleWeights` derived by its muscle map; leap writes `n`, `bp`,
+`primaries`, `secondaries`, `muscleGroups` only.
+
 ## Built-in exercise catalogue
 
 1,324 exercises in `frontend/src/lib/exercises-data.js`, ids are 4-digit

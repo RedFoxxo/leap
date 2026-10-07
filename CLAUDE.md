@@ -97,7 +97,8 @@ src/
     types.ts, context.ts, respond.ts, index.ts
     account/           read_me, read_instance; profile.ts: read_profile, read_settings,
                        read_document (raw escape hatch: any top-level key)
-    exercises/         read_exercises, read_exercise
+    exercises/         read_exercises, read_exercise, write_custom_exercise,
+                       delete_custom_exercise (history keeps its name, as in the app)
     training/          read_workouts, read_workout, read_routines, read_routine,
                        read_week_plan, read_bodyweight; format.ts shapes workouts for output
     stats/             read_exercise_history, read_records, read_training_summary,
@@ -192,9 +193,9 @@ best weight match openGym's stored `vol`/`topW` on all 33 workouts of its demo
 profile), `read_profile`, `read_settings`, `read_document`, stats (PRs match
 openGym's on the demo profile), body weight, goal, settings, notes,
 favourites and the raw write, routines and the plan, workouts (verified live
-and against openGym's own code).
+and against openGym's own code), custom exercises (verified live).
 
 Planned, in order:
 
-1. Custom exercises (create, edit, delete).
-2. Media, Coach, account, admin.
+1. Media: upload, attach to workouts and custom exercises, download, usage.
+2. Coach, account, admin.

@@ -39,6 +39,10 @@ MCP clients in the server handshake.
   `write_update_workout` and `delete_workout`. Volume, best weights, PR badges
   and the remembered working weight follow the app's rules; checked with
   openGym's own code on workouts leap wrote.
+- Custom exercises: `write_custom_exercise` (muscles in the app's body-map
+  names, link, assistance flag) and `delete_custom_exercise` (taken out of
+  routines, favourites and remembered weights; history keeps its name).
+  Muscle balance counts custom exercises with the built-in ones.
 - Fixed: assistance machines (where less weight is better) are now recognised
   as openGym recognises them, a leverage machine named "assisted" or a custom
   exercise marked so; before, 15 exercises with the dataset's "assisted"

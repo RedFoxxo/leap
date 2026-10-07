@@ -19,6 +19,12 @@ import { isRecord, type Entry, type State } from '../../state/types.js'
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
+/** An entry's exercise name; a deleted custom exercise's entries carry its name in `n`. */
+export function entryName(exercises: ExerciseIndex, entry: Entry): string {
+  const id = String(entry.id)
+  return exercises.get(id)?.name ?? str(entry.n) ?? id
+}
+
 export const isAssisted = (exercises: ExerciseIndex, id: string) => exercises.assisted(id)
 
 /** Rounds away float noise (33.75 × 12 sums) without hiding real decimals. */
@@ -63,7 +69,7 @@ export function workoutSummary(workout: Entry, state: State | null, exercises: E
   if (start) out.start = start
   const minutes = durationMin(workout)
   if (minutes !== undefined) out.durationMin = minutes
-  out.exercises = entriesOf(workout).map((e) => exercises.name(String(e.id)))
+  out.exercises = entriesOf(workout).map((e) => entryName(exercises, e))
   out.sets = setCounts(workout)
   out.volume = round(stored ?? workoutVolume(workout))
   if (prs.length) out.prs = prs.map((id) => exercises.name(id))
@@ -85,7 +91,7 @@ export function workoutDetail(workout: Entry, state: State | null, exercises: Ex
   summary.entries = entriesOf(workout).map((e, i) => {
     const id = String(e.id)
     const sets = setsOf(e)
-    const out: Entry = { position: i + 1, id, name: exercises.name(id) }
+    const out: Entry = { position: i + 1, id, name: entryName(exercises, e) }
     const rid = entryRoutineId(workout, e)
     if (rid && routineIdsOf(workout).length > 1) out.routine = { id: rid, name: routineName(state, rid) }
     if (str(e.sg)) out.superset = e.sg

@@ -1,6 +1,7 @@
 import { profileReadTools } from './account/profile.js'
 import { accountReadTools } from './account/read.js'
 import { exerciseReadTools } from './exercises/read.js'
+import { exerciseDeleteTools, exerciseWriteTools } from './exercises/write.js'
 import { routineDeleteTools, routineWriteTools } from './routines/write.js'
 import { settingsDeleteTools, settingsWriteTools } from './settings/write.js'
 import { statsReadTools } from './stats/read.js'
@@ -22,9 +23,11 @@ export function allTools(): AnyToolDef[] {
     ...accountReadTools,
     ...workoutWriteTools,
     ...routineWriteTools,
+    ...exerciseWriteTools,
     ...settingsWriteTools,
     ...workoutDeleteTools,
     ...routineDeleteTools,
+    ...exerciseDeleteTools,
     ...settingsDeleteTools,
   ]
 }

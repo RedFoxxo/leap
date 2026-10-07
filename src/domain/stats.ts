@@ -150,6 +150,15 @@ const MUSCLE_ALIASES: Record<string, string> = {
   'inner thighs': 'adductors',
   groin: 'adductors',
   soleus: 'calves',
+  // The app's body-map names, which custom exercises store.
+  'upper-back': 'upper back',
+  serratus: 'serratus anterior',
+  forearm: 'forearms',
+  'lower-back': 'lower back',
+  gluteal: 'glutes',
+  hamstring: 'hamstrings',
+  'hip-flexors': 'hip flexors',
+  tibialis: 'shins',
 }
 
 export const muscleName = (m: string) => MUSCLE_ALIASES[m.toLowerCase()] ?? m.toLowerCase()

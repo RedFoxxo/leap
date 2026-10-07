@@ -99,5 +99,6 @@ describe('muscle balance', () => {
     ])
     expect(unknownExercises).toEqual(['9001'])
     expect(muscleName('Shoulders')).toBe('delts')
+    expect(['gluteal', 'deltoids', 'upper-back', 'hamstring', 'tibialis'].map(muscleName)).toEqual(['glutes', 'delts', 'upper back', 'hamstrings', 'shins'])
   })
 })
