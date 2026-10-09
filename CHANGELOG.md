@@ -4,7 +4,53 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal) and is reported to
 MCP clients in the server handshake.
 
+## 1.1.0 — Unreleased
+
+Works with openGym 1.4.0 or later (tested with 1.4.0). **Needs openGym 1.4.0**:
+leap refuses to write to an older server; use leap 1.0.0 with openGym 1.3.9.
+
+- **Licence**: leap is now AGPL-3.0-or-later, like openGym (1.0.0 stays MIT).
+  See NOTICE.md.
+- **Sync**: writes as an up-to-date openGym client (`stamped: true`): every
+  changed setting, plan day, routine field and deletion is stamped as the app
+  stamps it, so devices merge leap's changes field by field and removals stick.
+  Sends the server's write id, and says plainly when the server cannot read the
+  stored profile. Fixes edits of routines, workouts and custom exercises that
+  were reported as not saved on openGym 1.3.10 and later. Checked against
+  openGym's own stamping code.
+- **Compatibility**: `read_instance` says which openGym the server runs as far
+  as leap can tell and whether leap can write to it.
+- **Exercise catalogue**: openGym's 5,632 exercises ship with leap (text only;
+  nothing is downloaded any more). Alias ids are stored as the exercise they
+  draw; 5-digit ids work. `read_exercises` matches like the app: gym shorthand,
+  plurals, run-together names, small typos, target/equipment/body part, best
+  matches first, and a category filter. Custom exercises take the new body
+  part and equipment.
+- **Rotation and session queue**: `read_week_plan` and `read_profile` follow
+  the rotation (rounds, pins, what planned each day); new `write_rotation`,
+  `write_schedule_mode`, `write_rotation_round`, `write_session_queue`
+  (planner) and `write_day_note` (missed-day notes). Logging the workout that
+  completes a round starts the next one, as the app does.
+- **Training**: triple progression, max sets, last set to failure, back-off
+  sets, pyramids (reps, rest and weight per set), what a dumbbell weight means,
+  superset names and rest; sets to failure, Max sets, treadmill incline and
+  timed holds per side; set fields leap does not manage are kept.
+- **Stats**: the seven 1RM formulas and the weighted blend, following the
+  profile's choice; volume counts both bells of a per-dumbbell entry; history
+  and records read dumbbell weights in the exercise's current meaning.
+- **New data**: body measurements (`read_measurements`, `write_measurement`,
+  `delete_measurement`), the dumbbell rack (`write_dumbbell_rack`) and what a
+  dumbbell weight means per exercise (`write_dumbbell_load`); the new settings
+  (focus view, 1RM formula, own accent colour, rest sound, nudge and its tone,
+  Bengali and Traditional Chinese, …) in `write_settings`.
+- **Coach and admin**: the Coach's "not set up" code; admin Coach output limit
+  and routing headers.
+- Write tools take "today" from the same clock as their stamps.
+- Verified end to end against a live openGym server (API 1.4.0).
+
 ## 1.0.0 — 2026-10-07
+
+Works with openGym 1.3.9.
 
 First release.
 

@@ -24,10 +24,11 @@ describe.runIf(LIVE)('state store (live)', () => {
     expect(before.ok).toBe(true)
     if (!before.ok) return
 
-    const seeded = await store.update((d) => marker(d, 'leapLiveUnknown', { keep: [1, 2] }))
+    const run = Date.now()
+    const seeded = await store.update((d) => marker(d, 'leapLiveUnknown', { keep: [1, 2], run }))
     expect(seeded.ok, !seeded.ok ? seeded.message : '').toBe(true)
-    const r = await store.update((d) => marker(d, 'leapLiveMarker', 'one'), {
-      verify: (s) => (s.leapLiveMarker === 'one' ? [] : ['leapLiveMarker']),
+    const r = await store.update((d) => marker(d, 'leapLiveMarker', `one ${run}`), {
+      verify: (s) => (s.leapLiveMarker === `one ${run}` ? [] : ['leapLiveMarker']),
     })
     expect(r.ok, !r.ok ? r.message : '').toBe(true)
     if (!r.ok) return
@@ -35,7 +36,7 @@ describe.runIf(LIVE)('state store (live)', () => {
     expect(r.data.rev).toBe(before.data.rev + 2)
 
     const after = await store.load()
-    expect(after.ok && after.data.state).toMatchObject({ leapLiveUnknown: { keep: [1, 2] }, leapLiveMarker: 'one' })
+    expect(after.ok && after.data.state).toMatchObject({ leapLiveUnknown: { keep: [1, 2], run }, leapLiveMarker: `one ${run}` })
   })
 
   it('redoes a change after a real 409 from another device', async () => {

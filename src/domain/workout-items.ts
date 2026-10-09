@@ -29,7 +29,22 @@ export interface SetInput {
   clusters?: { reps: number; restSec?: number | undefined }[] | undefined
   left?: SideInput | undefined
   right?: SideInput | undefined
+  /** Taken to failure (the app's "F"; counts as RIR 0 unless rated). */
+  failure?: boolean | undefined
+  /** A pyramid's "Max" set: as many reps as possible. */
+  max?: boolean | undefined
+  /** Cardio: incline in percent. */
+  incline?: number | undefined
+  /** Timed hold per side: which side this row is (the app logs L and R as two rows). */
+  side?: 'L' | 'R' | undefined
+  /** Fields openGym keeps on the row that leap does not manage (from read_workout); kept as they are. */
+  other?: Record<string, unknown> | undefined
 }
+
+/** Row fields leap writes; anything else on a stored row is openGym's own and comes back through `other`. */
+export const MANAGED_SET_KEYS: ReadonlySet<string> = new Set([
+  'w', 'r', 'done', 'rir', 'rpe', 'sec', 'min', 'speed', 'drops', 'clusters', 'sides', 'type', 'phase', 'warmup', 'failure', 'max', 'incline', 'side',
+])
 
 const withEffort = (row: Entry, s: { rir?: number | undefined; rpe?: number | undefined }) => {
   if (s.rir !== undefined) row.rir = s.rir
@@ -65,6 +80,11 @@ export function storedSet(s: SetInput): Entry {
     row.clusters = s.clusters.map((c) => ({ r: c.reps, ...(c.restSec !== undefined ? { restSec: c.restSec } : {}) }))
   }
   if (s.warmup) row.phase = 'warmup'
+  else if (s.failure) row.failure = true
+  if (s.max) row.max = true
+  if (s.incline !== undefined && s.incline > 0 && row.min !== undefined) row.incline = s.incline
+  if (s.side && row.sec !== undefined) row.side = s.side
+  if (s.other) for (const [k, v] of Object.entries(s.other)) if (!MANAGED_SET_KEYS.has(k) && !(k in row)) row[k] = v
   return row
 }
 
@@ -89,11 +109,17 @@ export function setForTools(row: Entry): Entry {
     Object.assign(out, { weight: num(row.w) ?? 0, reps: num(row.r) ?? 0, done: row.done === true }, effortOf(row))
   }
   if (isWarmup(row)) out.warmup = true
+  else if (row.failure === true) out.failure = true
+  if (row.max === true) out.max = true
+  if (num(row.incline) !== undefined && Number(row.incline) > 0) out.incline = row.incline
+  if (row.side === 'L' || row.side === 'R') out.side = row.side
   const type = setType(row)
   if (type === 'dropset' && Array.isArray(row.drops)) out.drops = row.drops.filter(isRecord).map((d) => ({ weight: num(d.w) ?? 0, reps: num(d.r) ?? 0 }))
   if (type === 'restpause' && Array.isArray(row.clusters)) {
     out.clusters = row.clusters.filter(isRecord).map((c) => ({ reps: num(c.r) ?? 0, ...(num(c.restSec) !== undefined ? { restSec: c.restSec } : {}) }))
   }
+  const other = Object.fromEntries(Object.entries(row).filter(([k, v]) => !MANAGED_SET_KEYS.has(k) && v !== undefined))
+  if (Object.keys(other).length) out.other = other
   return out
 }
 

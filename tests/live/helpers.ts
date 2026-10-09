@@ -17,7 +17,8 @@ export async function seedFixture(): Promise<void> {
   const http = new HttpCore({ baseUrl: config.baseUrl, token: config.token })
   const current = await new StateStore(http).load()
   if (!current.ok) throw new Error(current.message)
-  const r = await http.request({ method: 'PUT', path: '/api/data', json: { state: profile(), baseRev: current.data.rev } })
+  // Stamped, so the server replaces the document instead of putting back keys the fixture lacks (openGym 1.3.10+).
+  const r = await http.request({ method: 'PUT', path: '/api/data', json: { state: profile(), baseRev: current.data.rev, stamped: true } })
   if (!r.ok) throw new Error(r.message)
 }
 
@@ -29,7 +30,7 @@ export interface LiveResult {
 
 /** The real server against the instance in OPENGYM_URL, over an in-memory MCP transport. */
 export async function liveClient(): Promise<{ call: (name: string, args?: Record<string, unknown>) => Promise<LiveResult>; close: () => Promise<void> }> {
-  const catalog = new BuiltinCatalogProvider({ cacheFile: '.cache/live-exercises.json' })
+  const catalog = new BuiltinCatalogProvider()
   const server = createServer(
     createContext(loadConfig(), { backup: fileBackups('.cache/test-server/backups'), builtinExercises: () => catalog.get() }),
   )

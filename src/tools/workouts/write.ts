@@ -1,8 +1,12 @@
 import { z } from 'zod'
-import { ExerciseIndex } from '../../catalog/exercises.js'
+import { builtinIdShape, ExerciseIndex } from '../../catalog/exercises.js'
 import { dateOf, today } from '../../domain/dates.js'
 import { routineName } from '../../domain/plan.js'
-import { bestWeight, entriesOf, routineIdsOf, workoutVolume } from '../../domain/sets.js'
+import { creditedBy, refillAfter } from '../../domain/queue.js'
+import { dbLoadOf, entryAs, entryDbLoad, exerciseDbLoad } from '../../domain/dumbbells.js'
+import { beatsWeight } from '../../domain/stats.js'
+import { defaultItem } from '../../domain/routine-items.js'
+import { bestWeight, entriesOf, routineIdsOf, setMode, setsOf, workoutVolume } from '../../domain/sets.js'
 import { sessionName, storedSet } from '../../domain/workout-items.js'
 import { lowerKeptWeights, raiseKeptWeights, rebuildPrHistory, sortWorkouts, type AssistedCheck } from '../../domain/workouts.js'
 import { newId } from '../../state/ids.js'
@@ -35,6 +39,11 @@ const setInput = z
     clusters: z.array(z.object({ reps: z.number().int().min(1).max(1000), restSec: z.number().int().min(1).max(600).optional() }).strict()).min(1).max(20).optional().describe('Rest-pause: how the total reps broke down'),
     left: side.optional().describe('Per-side set: give left and right instead of weight/reps'),
     right: side.optional(),
+    failure: z.boolean().optional().describe('Taken to failure (the app shows an F; counts as RIR 0 unless rated). Not on warm-ups'),
+    max: z.boolean().optional().describe("A pyramid's Max set (as many reps as possible)"),
+    incline: z.number().min(0).max(40).multipleOf(0.5).optional().describe('Cardio: incline in percent (treadmill, stairs), 0–40 in steps of 0.5'),
+    side: z.enum(['L', 'R']).optional().describe('A timed hold done per side: the app logs each side as its own row, L then R'),
+    other: z.record(z.string(), z.unknown()).optional().describe('Ignored (from read_workout); those fields are kept as they are'),
   })
   .strict()
 
@@ -80,6 +89,10 @@ function setProblems(entries: EntryInput[], requireSets: boolean): string[] {
       if (s.sec !== undefined && (s.reps !== undefined || sided)) problems.push(`${where}: a timed set takes sec (and weight), not reps`)
       if (!cardio && s.sec === undefined && !sided && s.reps === undefined) problems.push(`${where}: reps are required (or sec for a timed set, min for cardio)`)
       if (s.clusters && s.reps !== undefined && s.clusters.reduce((n, c) => n + c.reps, 0) > s.reps) problems.push(`${where}: the clusters add up to more than reps (reps is the total)`)
+      if (s.failure && s.warmup) problems.push(`${where}: a warm-up is never taken to failure`)
+      if (s.failure && cardio) problems.push(`${where}: a cardio set is not taken to failure`)
+      if (s.incline !== undefined && !cardio) problems.push(`${where}: incline is for cardio sets (min, speed)`)
+      if (s.side !== undefined && s.sec === undefined) problems.push(`${where}: side (L/R) is for timed holds done per side; a per-side reps set takes left and right`)
     })
     // The app keeps only exercises with something done; an entry with no completed set would count as training that was not.
     if (e.sets && !e.sets.some(completed)) {
@@ -110,13 +123,31 @@ interface EntryContext {
   routineIds: string[]
   routines: Entry[]
   assisted: AssistedCheck
+  bodyweight: (id: string) => boolean
   now: number
+  state: State
 }
 
 /** The routine an exercise came from on a combined day: the first of the session's routines that plans it. */
 function inferRid(exerciseId: string, c: EntryContext): string | undefined {
   if (c.routineIds.length < 2) return undefined
   return c.routineIds.find((rid) => listOf(c.routines.find((r) => r.id === rid), 'ex').some((x) => x.id === exerciseId))
+}
+
+/**
+ * A new entry of a dumbbell exercise whose weight means "per dumbbell" or "both together" (the
+ * routine's choice, else the exercise's): the target carries the meaning, as a session the app
+ * starts does, so volume and comparisons read the weights right. The routine exercise is the
+ * target, as in the app; a freestyle entry gets the exercise's default plan, as the app's
+ * defaultConfig. Nothing for "as entered".
+ */
+function meaningFor(exerciseId: string, entry: Entry, c: EntryContext): Entry | undefined {
+  const rid = typeof entry.rid === 'string' ? entry.rid : c.routineIds.length === 1 ? c.routineIds[0] : undefined
+  const item = listOf(c.routines.find((r) => r.id === rid), 'ex').find((x) => x.id === exerciseId)
+  const meaning = dbLoadOf(item?.dbLoad) ?? exerciseDbLoad(c.state, exerciseId)
+  if (meaning === 'as') return undefined
+  const mode = setMode(setsOf(entry)[0] ?? {})
+  return { ...(item ? structuredClone(item) : defaultItem(exerciseId, mode, c.bodyweight(exerciseId))), dbLoad: meaning }
 }
 
 /** Sessions of a routine marked excludeFromProgression (a deload) do not count for progression, as in the app. */
@@ -129,14 +160,15 @@ function excluded(entry: Entry, c: EntryContext): boolean {
  * The workout's exercises: input order; an exercise the workout had (matched by id, in order) keeps
  * what is not given, a new one is built from the input. Returns the entries or why not.
  */
-function buildEntries(inputs: EntryInput[], existing: Entry[], c: EntryContext): Entry[] | string {
+function buildEntries(inputs: (EntryInput & { rawId?: string })[], existing: Entry[], c: EntryContext): Entry[] | string {
   const pool = new Map<string, Entry[]>()
   for (const e of existing) pool.set(String(e.id), [...(pool.get(String(e.id)) ?? []), e])
   const oldGroups = new Set(existing.map((e) => e.sg).filter((g): g is string => typeof g === 'string'))
   const groups = new Map<string, string>()
   const out: Entry[] = []
   for (const [i, x] of inputs.entries()) {
-    const old = pool.get(x.exerciseId)?.shift()
+    // An entry stored under an alias id (an import, a plan file) is matched by that id first; it keeps it.
+    const old = (x.rawId !== undefined && x.rawId !== x.exerciseId ? pool.get(x.rawId)?.shift() : undefined) ?? pool.get(x.exerciseId)?.shift()
     if (!old && !x.sets) return `exercise ${i + 1} (${x.exerciseId}) is new to this workout and needs its sets`
     const e: Entry = old ? structuredClone(old) : { id: x.exerciseId, target: null }
     if (x.sets) e.sets = x.sets.map(storedSet)
@@ -167,6 +199,10 @@ function buildEntries(inputs: EntryInput[], existing: Entry[], c: EntryContext):
       if (rid) e.rid = rid
     }
     if (!old && excluded(e, c)) e.noProg = true
+    if (!old) {
+      const meaning = meaningFor(x.exerciseId, e, c)
+      if (meaning) e.target = meaning
+    }
     e.topW = bestWeight(e, c.assisted(x.exerciseId)) || null
     out.push(e)
   }
@@ -199,7 +235,7 @@ async function checks(ctx: ToolContext): Promise<(state: State) => Checks> {
       names: index,
       assisted: (id) => index.assisted(id),
       unknown: (ids, allowed = new Set()) => {
-        const missing = ids.filter((id) => !index.get(id) && !allowed.has(id) && !(builtin.error && /^\d{4}$/.test(id)))
+        const missing = ids.filter((id) => !index.get(id) && !allowed.has(id) && !(builtin.error && builtinIdShape(id)))
         return missing.length ? `unknown exercise ids: ${[...new Set(missing)].join(', ')}; find ids with read_exercises` : undefined
       },
     }
@@ -225,13 +261,42 @@ function summary(w: Entry, state: State, names: ExerciseIndex) {
   }
 }
 
+/**
+ * A session finished today is held against history read the way it logged a dumbbell weight, as
+ * the app's finish does (openGym `sheets.jsx` finish, `bestWeightFor(…, entryDbLoad(e))`, v1.4.0):
+ * 20 kg "each" on two bells beats an earlier 38 kg "total". Entries logged as entered keep the
+ * badge rebuildPrHistory gave them.
+ */
+function badgesInMeaning(state: State, saved: Entry, c: Checks): void {
+  const prs = new Set(Array.isArray(saved.prs) ? saved.prs.filter((x): x is string => typeof x === 'string') : [])
+  for (const e of entriesOf(saved)) {
+    const id = String(e.id)
+    const meaning = entryDbLoad(e)
+    if (meaning === 'as') continue
+    const assisted = c.assisted(id)
+    const name = c.names.name(id)
+    let prior = 0
+    for (const w of listOf(state, 'workouts')) {
+      if (w.id === saved.id) continue
+      for (const other of entriesOf(w)) {
+        if (other.id !== id) continue
+        const b = bestWeight(entryAs(other, meaning, name), assisted)
+        if (beatsWeight(b, prior, assisted)) prior = b
+      }
+    }
+    if (beatsWeight(bestWeight(e, assisted), prior, assisted)) prs.add(id)
+    else prs.delete(id)
+  }
+  saved.prs = [...prs]
+}
+
 const notInFuture = (date: string, now: number) => (date > today(now) ? `${date} is in the future; only training that happened is logged` : undefined)
 const withoutStamp = (w: Entry) => JSON.stringify({ ...w, _ts: undefined })
 
 export const writeLogWorkout = defineTool({
   name: 'write_log_workout',
   description:
-    'Log a finished workout. Sets: weight + reps (done defaults to true), warmup, rir or rpe, a drop set (drops), rest-pause (clusters; reps is the total), per side (left and right), timed (sec, optional weight) or cardio (min, speed in km/h). Weights in the profile unit. Every exercise needs at least one completed set. On a combined day (several routineIds) each exercise is linked to its routine, inferred when not given; sessions of a routine excluded from progression are marked so. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. Without a start time, today ends now and other days start at 18:00. No future dates.',
+    'Log a finished workout. Sets: weight + reps (done defaults to true), warmup, rir or rpe, failure (taken to failure), a drop set (drops), rest-pause (clusters; reps is the total), a pyramid\'s Max set (max), per side (left and right), timed (sec, optional weight; a hold per side is two rows, side L then R) or cardio (min, speed in km/h, optional incline in %). Weights in the profile unit; for a dumbbell exercise whose weight means per dumbbell or both together, the session is stamped with that meaning, as in the app, and volume counts both bells when it is per dumbbell. Every exercise needs at least one completed set. On a combined day (several routineIds) each exercise is linked to its routine, inferred when not given; sessions of a routine excluded from progression are marked so. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. When the plan follows the app\'s rotation, the output says which sessions of the round the workout did, and the workout that completes a round starts the next one the day after, as the app does. Without a start time, today ends now and other days start at 18:00. No future dates.',
   input: {
     date: isoDate.optional().describe('Default today'),
     start: time.optional().describe('Local start time HH:MM'),
@@ -245,8 +310,8 @@ export const writeLogWorkout = defineTool({
   async handler(args, ctx) {
     const problems = setProblems(args.entries, true)
     if (problems.length) return invalid(problems.join('; '))
-    const date = args.date ?? today()
-    const future = notInFuture(date, Date.now())
+    const date = args.date ?? today(ctx.now())
+    const future = notInFuture(date, ctx.now())
     if (future) return invalid(future)
     const duration = (args.durationMin ?? 60) * 60_000
     const makeChecks = await checks(ctx)
@@ -255,13 +320,14 @@ export const writeLogWorkout = defineTool({
       'log the workout',
       (draft, { now }) => {
         const c = makeChecks(draft)
-        const unknown = c.unknown(args.entries.map((e) => e.exerciseId))
+        const asked = args.entries.map((e) => ({ ...e, exerciseId: c.names.canonical(e.exerciseId) }))
+        const unknown = c.unknown(asked.map((e) => e.exerciseId))
         if (unknown) return refuse(unknown)
         const routineIds = [...new Set(args.routineIds ?? [])]
         const routines = listOf(draft, 'routines')
         const missing = routineIds.filter((id) => !routines.some((r) => r.id === id))
         if (missing.length) return refuse(`no routine with id ${missing.map((m) => `"${m}"`).join(', ')}`)
-        const entries = buildEntries(args.entries, [], { routineIds, routines, assisted: c.assisted, now })
+        const entries = buildEntries(asked, [], { routineIds, routines, assisted: c.assisted, bodyweight: (id) => c.names.get(id)?.equipment === 'body weight', now, state: draft })
         if (typeof entries === 'string') return refuse(entries)
         const start = args.start ? at(date, args.start) : date === today(now) ? now - duration : at(date, '18:00')
         const bw = args.bodyWeight ?? weighInOn(draft, date)
@@ -280,17 +346,22 @@ export const writeLogWorkout = defineTool({
           ...(allExcluded ? { excludeFromProgression: true } : {}),
           ...(args.note?.trim() ? { note: args.note.trim() } : {}),
         }
-        workout.vol = workoutVolume(workout)
+        workout.vol = workoutVolume(workout, (id) => c.names.name(id))
         workout._ts = now
         const list = writableList(draft, 'workouts')
         list.push(workout)
         const ids = entriesOf(workout).map((e) => String(e.id))
         draft.workouts = rebuildPrHistory(sortWorkouts(list), ids, workout, c.assisted)
         const saved = listOf(draft, 'workouts').find((w) => w.id === workout.id)!
+        if (date === today(ctx.now())) badgesInMeaning(draft, saved, c)
         const raised = date === today(now) ? raiseKeptWeights(draft, saved, c.assisted) : []
-        return apply({ id: saved.id, shown: summary(saved, draft, c.names), raised: raised.map((x) => c.names.name(x)) })
+        // The rotation: which sessions of the round this workout did, and the next round when it closed this one (as the app's finish does).
+        const credited = creditedBy(draft, saved).map((id) => routineName(draft, id))
+        const next = refillAfter(draft, saved, today(ctx.now()), ctx.now())
+        const rotation = credited.length ? { sessionsDone: credited, ...(next ? { roundComplete: true, nextRound: { startsOn: next.startsOn, sessions: next.ids.map((id) => routineName(draft, id)) } } : {}) } : undefined
+        return apply({ id: saved.id, shown: summary(saved, draft, c.names), raised: raised.map((x) => c.names.name(x)), rotation })
       },
-      (r) => ({ logged: r.shown, ...(r.raised.length ? { rememberedWeightRaised: r.raised } : {}) }),
+      (r) => ({ logged: r.shown, ...(r.raised.length ? { rememberedWeightRaised: r.raised } : {}), ...(r.rotation ? { rotation: r.rotation } : {}) }),
       { verify: (s, r) => (listOf(s, 'workouts').some((w) => w.id === r.id) ? [] : [`workout ${String(r.id)}`]) },
     )
   },
@@ -316,7 +387,7 @@ export const writeUpdateWorkout = defineTool({
     const problems = setProblems(args.entries ?? [], false)
     if (problems.length) return invalid(problems.join('; '))
     if (args.date) {
-      const future = notInFuture(args.date, Date.now())
+      const future = notInFuture(args.date, ctx.now())
       if (future) return invalid(future)
     }
     const makeChecks = await checks(ctx)
@@ -329,8 +400,9 @@ export const writeUpdateWorkout = defineTool({
         const i = list.findIndex((w) => isRecord(w) && w.id === id)
         if (i < 0) return refuse(`no workout with id "${id}"; find ids with read_workouts`)
         const before = list[i] as Entry
-        if (args.entries) {
-          const unknown = c.unknown(args.entries.map((e) => e.exerciseId), new Set(entriesOf(before).map((e) => String(e.id))))
+        const asked = args.entries?.map((e) => ({ ...e, rawId: e.exerciseId, exerciseId: c.names.canonical(e.exerciseId) }))
+        if (asked) {
+          const unknown = c.unknown(asked.map((e) => e.exerciseId), new Set(entriesOf(before).map((e) => String(e.id))))
           if (unknown) return refuse(unknown)
         }
         const record: Entry = structuredClone(before)
@@ -355,12 +427,12 @@ export const writeUpdateWorkout = defineTool({
           if (args.bodyWeight === null) delete record.bw
           else record.bw = args.bodyWeight
         }
-        if (args.entries) {
-          const entries = buildEntries(args.entries, entriesOf(before), { routineIds: routineIdsOf(before), routines: listOf(draft, 'routines'), assisted: c.assisted, now })
+        if (asked) {
+          const entries = buildEntries(asked, entriesOf(before), { routineIds: routineIdsOf(before), routines: listOf(draft, 'routines'), assisted: c.assisted, bodyweight: (id) => c.names.get(id)?.equipment === 'body weight', now, state: draft })
           if (typeof entries === 'string') return refuse(entries)
           record.entries = entries
         }
-        record.vol = workoutVolume(record)
+        record.vol = workoutVolume(record, (id) => c.names.name(id))
         // An unchanged workout is not stamped: the stamp would outrank an unsynced edit made elsewhere.
         if (withoutStamp(record) === withoutStamp(before)) return apply({ stamp: before._ts, shown: summary(before, draft, c.names) })
         record._ts = now
@@ -375,7 +447,7 @@ export const writeUpdateWorkout = defineTool({
       {
         verify: (s, r) => {
           const stored = listOf(s, 'workouts').find((w) => w.id === id)
-          return stored && stored._ts === r.stamp ? [] : [`workout ${id}`]
+          return stored && Number(stored._ts) >= Number(r.stamp) ? [] : [`workout ${id}`]
         },
       },
     )

@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { addDays, dateOf, isoDate as isoOf, today } from '../../domain/dates.js'
-import { exerciseSessions, loggedExerciseIds, muscleLoads, type BestSet, type Formula } from '../../domain/stats.js'
+import { currentDbLoad } from '../../domain/dumbbells.js'
+import { exerciseSessions, FORMULA_NAMES, formulaOf, loggedExerciseIds, muscleLoads, type BestSet, type Formula } from '../../domain/stats.js'
 import { completedReps, doneUnits, entriesOf, isWarmup, setsOf, workoutVolume } from '../../domain/sets.js'
-import { listOf, unitOf, type Entry } from '../../state/types.js'
+import { listOf, unitOf, type Entry, type State } from '../../state/types.js'
 import { loadProfile } from '../context.js'
 import { failure, invalid, success } from '../respond.js'
 import { exerciseId, isoDate, limit } from '../schema.js'
@@ -10,22 +11,29 @@ import { defineTool } from '../types.js'
 import { round } from '../training/format.js'
 
 const formula = z
-  .enum(['epley', 'brzycki', 'lombardi'])
+  .enum(FORMULA_NAMES)
   .optional()
-  .describe('1RM formula (default epley, as in the app). No estimate above 12 reps; 1 rep is the weight itself.')
+  .describe("1RM formula; default the one picked in the profile's settings (else epley), as the app does. A single formula gives no estimate above 12 reps; weighted blends all seven and counts reps in reserve, up to 15. 1 rep is the weight itself.")
+
+/** How dumbbell weights are read: in the exercise's current meaning, when it has one. */
+const dumbbellNote = (state: State | null, id: string) => {
+  const as = currentDbLoad(state, id)
+  return as === 'as' ? {} : { weightsRead: as === 'each' ? 'per dumbbell' : 'both dumbbells together' }
+}
 
 const oneRm = (b: BestSet | null) => (b ? { estimate: b.estimate, weight: b.w, reps: b.r } : undefined)
 
 export const readExerciseHistory = defineTool({
   name: 'read_exercise_history',
   description:
-    'Every session of one exercise, newest first: the completed work sets ("100×5", drops as "→ 80×6", per side as "L …/ R …"), work sets, reps, volume, best weight, best estimated 1RM, and whether the session set a weight record or a 1RM record against all earlier sessions (the first load ever logged counts, as in the app). Plus all-time bests. Weights in the profile unit.',
+    'Every session of one exercise, newest first: the completed work sets ("100×5", drops as "→ 80×6", per side as "L …/ R …"), work sets, reps, volume, best weight, best estimated 1RM, and whether the session set a weight record or a 1RM record against all earlier sessions (the first load ever logged counts, as in the app). Plus all-time bests. Weights in the profile unit; a dumbbell exercise whose weight was logged per dumbbell or both together is read in its current meaning (weightsRead), as the app does.',
   input: { exerciseId, from: isoDate.optional(), to: isoDate.optional(), limit: limit(20, 1000), formula },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { state, exercises } = profile.data
-    const all = exerciseSessions(state, args.exerciseId, exercises, (args.formula ?? 'epley') as Formula)
+    const f: Formula = args.formula ?? formulaOf(state)
+    const all = exerciseSessions(state, args.exerciseId, exercises, f)
     if (!all.length && !exercises.get(args.exerciseId)) return failure(`No exercise with id "${args.exerciseId}" and no sessions of it; find ids with read_exercises`)
     const bestWeight = all.filter((s) => s.weightRecord).at(-1)
     const best1RM = all.filter((s) => s.estimateRecord).at(-1)
@@ -35,7 +43,8 @@ export const readExerciseHistory = defineTool({
       id: args.exerciseId,
       name: exercises.name(args.exerciseId),
       unit: unitOf(state),
-      formula: args.formula ?? 'epley',
+      formula: f,
+      ...dumbbellNote(state, args.exerciseId),
       sessionsTotal: all.length,
       ...(all.length ? { firstDone: all[0]!.date, lastDone: all.at(-1)!.date } : {}),
       ...(bestWeight ? { bestWeight: { weight: bestWeight.bestWeight, date: bestWeight.date } } : {}),
@@ -73,8 +82,9 @@ export const readRecords = defineTool({
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { state, exercises } = profile.data
+    const f: Formula = args.formula ?? formulaOf(state)
     const rows = loggedExerciseIds(state).map((id) => {
-      const sessions = exerciseSessions(state, id, exercises, (args.formula ?? 'epley') as Formula)
+      const sessions = exerciseSessions(state, id, exercises, f)
       const w = sessions.filter((s) => s.weightRecord).at(-1)
       const e = sessions.filter((s) => s.estimateRecord).at(-1)
       const lastRecord = [w?.date, e?.date].filter((d): d is string => !!d).sort().at(-1)
@@ -101,7 +111,7 @@ export const readRecords = defineTool({
     const max = args.limit ?? 50
     return success({
       unit: unitOf(state),
-      formula: args.formula ?? 'epley',
+      formula: f,
       total: filtered.length,
       ...(filtered.length > max ? { truncated: true } : {}),
       ...(exercises.warning ? { warning: exercises.warning } : {}),
@@ -143,7 +153,7 @@ export const readTrainingSummary = defineTool({
     if (count > MAX_PERIODS) return invalid(`too many ${by}s (${Math.round(count)}); choose a shorter range or group by ${by === 'day' ? 'week or month' : 'month'}`)
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
-    const { state } = profile.data
+    const { state, exercises } = profile.data
     const weekStart = state?.weekStart === 0 ? 0 : 1
     const periods = new Map<string, { workouts: number; minutes: number; workSets: number; reps: number; volume: number }>()
     const blank = () => ({ workouts: 0, minutes: 0, workSets: 0, reps: 0, volume: 0 })
@@ -162,7 +172,7 @@ export const readTrainingSummary = defineTool({
         minutes,
         workSets: work.reduce((n, s) => n + doneUnits(s), 0),
         reps: work.reduce((n, s) => n + completedReps(s), 0),
-        volume: workoutVolume(w),
+        volume: workoutVolume(w, (id) => exercises.name(id)),
       }
       for (const t of [p, total]) for (const k of Object.keys(add) as (keyof typeof add)[]) t[k] += add[k]
       periods.set(periodStart(d, by, weekStart), p)

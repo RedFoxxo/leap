@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import type { Exercise } from '../../catalog/exercises.js'
+import { searchExercises } from '../../catalog/search.js'
+import { BELL_EQUIPMENT, exerciseDbLoad } from '../../domain/dumbbells.js'
 import { muscleName } from '../../domain/stats.js'
 import { isRecord, mapOf, unitOf } from '../../state/types.js'
 import { loadProfile } from '../context.js'
@@ -16,6 +18,7 @@ function summary(e: Exercise, favourite: boolean) {
     ...(e.bodyPart ? { bodyPart: e.bodyPart } : {}),
     ...(e.equipment ? { equipment: e.equipment } : {}),
     ...(e.target ? { target: e.target } : {}),
+    ...(e.category ? { category: e.category } : {}),
     ...(e.custom ? { custom: true } : {}),
     ...(favourite ? { favourite: true } : {}),
   }
@@ -24,12 +27,13 @@ function summary(e: Exercise, favourite: boolean) {
 export const readExercises = defineTool({
   name: 'read_exercises',
   description:
-    'Find exercises: the built-in catalogue (1,324, English names) and the profile\'s own custom exercises. Every word of `query` must appear in the name; filters match exactly (case-insensitive). Body parts: back, cardio, chest, lower arms, lower legs, neck, shoulders, upper arms, upper legs, waist. Use the returned id in other tools.',
+    "Find exercises: openGym's built-in catalogue (5,632, English names) and the profile's own custom exercises. Every word of `query` must be found, best matches first: in the name above all, also in the target muscle, equipment, body part or secondary muscles; gym shorthand (db, bb, kb, ohp, rdl, …), plurals, run-together names (\"benchpress\") and small typos work. Filters match exactly (case-insensitive). Body parts: back, cardio, chest, full body, lower arms, lower legs, neck, shoulders, upper arms, upper legs, waist. Categories: strength, calisthenics, stretching, mobility, plyometrics, isometric, cardio, yoga, olympic, pilates, rehab, combat. Use the returned id in other tools.",
   input: {
-    query: z.string().max(100).optional().describe('Words that must all appear in the name, e.g. "bench press"'),
+    query: z.string().max(100).optional().describe('e.g. "incline db press"'),
     bodyPart: z.string().max(40).optional(),
-    equipment: z.string().max(40).optional().describe('e.g. barbell, dumbbell, cable, body weight, leverage machine'),
+    equipment: z.string().max(40).optional().describe('e.g. barbell, dumbbell, cable, body weight, leverage machine, kettlebell, landmine'),
     target: z.string().max(40).optional().describe('Main muscle, e.g. pectorals, lats, quads, glutes, delts'),
+    category: z.string().max(40).optional().describe('Built-in exercises only, e.g. strength, stretching, mobility'),
     source: z.enum(['all', 'builtin', 'custom']).optional().describe('Default all'),
     favouritesOnly: z.boolean().optional(),
     limit: limit(50, 500),
@@ -38,26 +42,17 @@ export const readExercises = defineTool({
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { exercises } = profile.data
-    const words = lower(args.query)?.split(/\s+/).filter(Boolean) ?? []
     const source = args.source ?? 'all'
-    const matches = [...exercises.byId.values()].filter(
+    const filtered = [...exercises.byId.values()].filter(
       (e) =>
         (source === 'all' || (source === 'custom') === e.custom) &&
         (!args.favouritesOnly || exercises.favourites.has(e.id)) &&
-        words.every((w) => e.name.toLowerCase().includes(w) || e.id === w) &&
         (!args.bodyPart || lower(e.bodyPart) === lower(args.bodyPart)) &&
         (!args.equipment || lower(e.equipment) === lower(args.equipment)) &&
+        (!args.category || lower(e.category) === lower(args.category)) &&
         (!args.target || (e.target !== undefined && muscleName(e.target) === muscleName(args.target))),
     )
-    const query = words.join(' ')
-    matches.sort(
-      (a, b) =>
-        Number(b.name.toLowerCase() === query) - Number(a.name.toLowerCase() === query) ||
-        Number(exercises.favourites.has(b.id)) - Number(exercises.favourites.has(a.id)) ||
-        Number(b.custom) - Number(a.custom) ||
-        a.name.length - b.name.length ||
-        a.name.localeCompare(b.name),
-    )
+    const matches = searchExercises(filtered, args.query ?? '', { favourites: exercises.favourites })
     const max = args.limit ?? 50
     return success({
       total: matches.length,
@@ -71,7 +66,7 @@ export const readExercises = defineTool({
 export const readExercise = defineTool({
   name: 'read_exercise',
   description:
-    'One exercise by id: name, body part, equipment, target and secondary muscles, instruction steps (built-in, English) or description, link, muscles and photo or video (custom; the hash works with write_download_media and delete_media), plus the profile\'s standing note for it, whether it is a favourite, and the remembered working weight (`lastWeight`, in the profile unit).',
+    'One exercise by id: name, body part, equipment, category, target and secondary muscles, description and instruction steps (built-in, English), or description, link, muscles and photo or video (custom; the hash works with write_download_media and delete_media), plus the profile\'s standing note for it, whether it is a favourite, for dumbbell and kettlebell exercises what a weight means (weightMeans: as entered, each, total), and the remembered working weight (`lastWeight`, in the profile unit).',
   input: { id: exerciseId },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
@@ -84,6 +79,7 @@ export const readExercise = defineTool({
     }
     const memory = mapOf(state, 'exWeights')[e.id]
     const note = exercises.note(e.id)
+    const means = BELL_EQUIPMENT.has(e.equipment ?? '') ? exerciseDbLoad(state, e.id) : undefined
     return success({
       ...summary(e, exercises.favourites.has(e.id)),
       secondary: e.secondary,
@@ -94,6 +90,7 @@ export const readExercise = defineTool({
       ...(e.secondaryMuscles ? { secondaryMuscles: e.secondaryMuscles } : {}),
       ...(e.media ? { media: { hash: e.media.hash, kind: e.media.kind, mime: e.media.mime, size: e.media.size, width: e.media.width, height: e.media.height } } : {}),
       ...(note ? { note } : {}),
+      ...(means ? { weightMeans: means } : {}),
       ...(isRecord(memory) && typeof memory.w === 'number'
         ? { lastWeight: { weight: memory.w, unit: unitOf(state), ...(typeof memory.d === 'string' ? { date: memory.d } : {}) } }
         : {}),

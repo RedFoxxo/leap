@@ -23,7 +23,7 @@ export async function redeem(http: HttpCore, rawCode: string): Promise<Result<Pa
   const code = normalizeCode(rawCode)
   if (!code) return err(0, 'A pairing code is 8 characters from A-Z and 2-9 (no 0, O, 1 or I)')
   const r = await http.request<Paired>({ method: 'POST', path: '/api/pair/redeem', json: { code }, keepTokens: true })
-  if (!r.ok) return r
+  if (!r.ok) return r.code === 'pair-invalid' ? { ...r, message: `${r.message} (the code is wrong, already used or expired; make a new one in openGym)` } : r
   if (typeof r.data?.token !== 'string' || !r.data.token) return err(r.status, 'openGym accepted the code but sent no token')
   return ok(r.data, r.status)
 }

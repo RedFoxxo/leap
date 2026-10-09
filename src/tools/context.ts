@@ -1,4 +1,5 @@
 import { BuiltinCatalogProvider, ExerciseIndex, type BuiltinCatalog } from '../catalog/exercises.js'
+import { ServerCheck } from '../compat.js'
 import type { Config } from '../config.js'
 import { HttpCore, type FetchLike } from '../http/core.js'
 import type { Result } from '../http/result.js'
@@ -17,6 +18,10 @@ export interface ToolContext {
   /** openGym's built-in exercises (names, muscles, instructions). */
   builtinExercises: () => Promise<BuiltinCatalog>
   log: Logger
+  /** The clock writes are stamped with; "today" for a write tool comes from it too. */
+  now: () => number
+  /** Which openGym the instance runs; profile writes are refused on one this release does not support. */
+  server: ServerCheck
 }
 
 export interface ContextOptions {
@@ -35,17 +40,15 @@ export function createContext(config: Config, options: ContextOptions = {}): Too
   const httpOptions = { baseUrl: config.baseUrl, token: config.token, log }
   const http = new HttpCore(options.fetch ? { ...httpOptions, fetch: options.fetch } : httpOptions)
   const backup = options.backup === undefined ? fileBackups(defaultBackupDir(config.baseUrl)) : (options.backup ?? undefined)
-  const store = new StateStore(http, {
-    ...(backup ? { backup } : {}),
-    ...(options.now ? { now: options.now } : {}),
-  })
+  const now = options.now ?? Date.now
+  const server = new ServerCheck(http, now)
+  const store = new StateStore(http, { ...(backup ? { backup } : {}), now, server: () => server.writable() })
   let builtinExercises = options.builtinExercises
   if (!builtinExercises) {
     const provider = new BuiltinCatalogProvider({ log })
-    provider.start()
     builtinExercises = () => provider.get()
   }
-  return { config, http, store, builtinExercises, log }
+  return { config, http, store, builtinExercises, log, now, server }
 }
 
 /** The profile document and every exercise it can use, loaded together. */

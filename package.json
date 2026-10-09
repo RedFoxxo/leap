@@ -30,8 +30,10 @@
   },
   "files": [
     "build/**/*.js",
+    "data/exercises.json",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE.md"
   ],
   "engines": {
     "node": ">=22.12"
@@ -43,7 +45,7 @@
     "test:live": "OPENGYM_LIVE=1 vitest run --config vitest.live.config.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
     "zod": "4.6.5"

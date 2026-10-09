@@ -1,3 +1,5 @@
+import { compatOf } from '../../compat.js'
+import { VERSION } from '../../version.js'
 import { failure, success } from '../respond.js'
 import { defineTool } from '../types.js'
 
@@ -24,16 +26,24 @@ export const readMe = defineTool({
 export const readInstance = defineTool({
   name: 'read_instance',
   description:
-    'The instance: whether it is up, how many accounts it has, and its configuration (invite-only, guest mode, password login, default language, media limits in MB, and the AI Coach block, null when the Coach is off).',
+    'The instance: whether it is up, how many accounts it has, which openGym it runs as far as leap can tell and whether leap can write to it (compatibility), and its configuration (invite-only, guest mode, password login, default language, media limits in MB, and the AI Coach block, null when the Coach is off).',
   input: {},
   async handler(_args, ctx) {
     const [health, config] = await Promise.all([
-      ctx.http.request<{ ok: boolean; users?: number }>({ method: 'GET', path: '/api/health' }),
+      ctx.http.request<{ ok: boolean; users?: number; writable?: boolean }>({ method: 'GET', path: '/api/health' }),
       ctx.http.request<Record<string, unknown>>({ method: 'GET', path: '/api/config' }),
     ])
-    if (!health.ok) return failure('openGym is not reachable or not healthy', health)
+    const compat = compatOf(health)
+    if (!health.ok && !(health.status === 503 && compat.openGym !== 'unknown')) return failure('openGym is not reachable or not healthy', health)
     if (!config.ok) return failure('Could not read the instance configuration', config)
-    return success({ url: ctx.config.baseUrl, up: health.data.ok === true, users: health.data.users, config: config.data })
+    const up = health.ok && health.data.ok === true
+    return success({
+      url: ctx.config.baseUrl,
+      up,
+      ...(health.ok ? { users: health.data.users } : {}),
+      compatibility: { leap: VERSION, openGym: compat.openGym, supported: compat.supported, leapCanWrite: compat.writable, ...(compat.reason ? { reason: compat.reason } : {}) },
+      config: config.data,
+    })
   },
 })
 

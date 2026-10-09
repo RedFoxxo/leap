@@ -34,14 +34,14 @@ export async function change<R>(
   return written(r.data, show(r.data.result))
 }
 
-/** Why a deleted entry can come back, said by every delete tool. */
 /**
- * Why a settings or plan change can be undone, said by the tools that write them: openGym merges
- * settings, the week plan and date overrides whole, from the copy changed last (verified with its
- * own merge code; see docs/OPENGYM.md, "Sync between devices").
+ * When a settings or plan change can still be undone, said by the tools that write them: openGym
+ * (1.3.10 and later) merges settings, plan days and notes one at a time, by their stamps (see
+ * docs/OPENGYM.md, "Sync between devices").
  */
 export const LAST_CHANGE_NOTE =
-  'openGym takes settings and the plan as a whole from the copy changed last: a device that made its own unsynced change after this write keeps its values when it syncs. Check again later if that matters.'
+  'openGym merges settings and the plan one setting and one day at a time: only a device that changes the same setting or day later, before it syncs, keeps its own value.'
 
+/** When a deleted entry can still come back, said by every delete tool. */
 export const RESURRECTION_NOTE =
-  'openGym keeps no record of deletions: a device that still holds unsynced changes from before this delete brings the entry back when it syncs. Check again later if that matters.'
+  'openGym records the deletion, so every updated device drops the entry too; it comes back only from a device still on openGym 1.3.9 with unsynced changes, or from a device that edits the entry after the deletion before it syncs.'

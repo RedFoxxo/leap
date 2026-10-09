@@ -54,7 +54,33 @@ npm run test:live
 node scripts/test-server.mjs stop     # removes the container and its data
 ```
 
+The image defaults to the openGym release in `OPENGYM.tested` (`src/version.ts`).
 `OPENGYM_IMAGE` picks another image tag, `OPENGYM_TEST_PORT` another port.
+
+## Exercise catalogue
+
+`data/exercises.json` is openGym's exercise catalogue (text only), generated
+from an openGym checkout at a release tag:
+
+```sh
+git clone https://gitlab.com/DuarteSantos8/opengym.git ../opengym
+git -C ../opengym checkout v1.4.0
+node scripts/build-catalogue.mjs ../opengym
+```
+
+Never copy the pictures or animations (`catalogue/media/`): they are licensed
+from Gym visual for openGym only.
+
+## Moving to a new openGym release
+
+1. Research what changed since the release in `docs/OPENGYM.md` (sync, the
+   document's shape, `api/server.js`) and update that file.
+2. Regenerate the catalogue from the new tag.
+3. Set `OPENGYM` in `src/version.ts`, the README's compatibility table, the
+   changelog line and the test server's image tag (a test keeps them equal).
+4. Run the live tests against the new image.
+5. Raising `OPENGYM.minimum` drops servers that worked before: say so in the
+   changelog.
 
 ## Branches
 
@@ -66,7 +92,8 @@ node scripts/test-server.mjs stop     # removes the container and its data
 ## Releasing
 
 1. Bump the version in `package.json` and `src/version.ts` (a test keeps them
-   equal), and move the changelog entry from "Unreleased" to the release date.
+   equal), move the changelog entry from "Unreleased" to the release date, and
+   replace "(next)" in the README's compatibility table.
 2. Commit on `main`; `npm run typecheck`, `npm test` and `npm run build` must pass.
 3. Fast-forward `stable` to `main` and tag the release: `git tag v<version>`.
 4. Push `main`, `stable` and the tag.

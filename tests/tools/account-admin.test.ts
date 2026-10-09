@@ -87,6 +87,22 @@ describe('admin', () => {
     await h.close()
   })
 
+  it('sets the Coach output limit and routing headers, never credentials', async () => {
+    const stub = new FetchStub().post('/api/admin/coach/config', { ok: true })
+    const h = await harness({ stub })
+    const r = await h.call('admin_coach_config', { outputLimit: 20000, headers: { 'X-Title': 'openGym' } })
+    expect(r.isError, r.text).toBe(false)
+    expect(stub.find('POST', '/api/admin/coach/config')[0]!.body).toEqual({ maxOutputTokens: 20000, headers: { 'X-Title': 'openGym' } })
+    await h.call('admin_coach_config', { headers: null })
+    expect(stub.find('POST', '/api/admin/coach/config')[1]!.body).toEqual({ headers: null })
+    expect((await h.call('admin_coach_config', { headers: { 'X-Api-Key': 'x' } })).text).toMatch(/looks like a credential/)
+    expect((await h.call('admin_coach_config', { headers: { 'X-Route': 'Bearer abc123' } })).text).toMatch(/looks like a credential/)
+    const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`X-H${i}`, 'v']))
+    expect((await h.call('admin_coach_config', { headers: many })).text).toMatch(/at most 8 headers/)
+    expect(stub.find('POST', '/api/admin/coach/config')).toHaveLength(2)
+    await h.close()
+  })
+
   it('summarises a profile instead of returning its whole history', async () => {
     const workouts = Array.from({ length: 40 }, (_, i) => ({ id: `w${i}`, d: `2026-09-${String((i % 28) + 1).padStart(2, '0')}`, name: 'Push', vol: 100 + i, entries: [{ id: '0025', sets: [] }] }))
     const stub = new FetchStub().get('/api/admin/user', {

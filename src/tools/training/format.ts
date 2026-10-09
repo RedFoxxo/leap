@@ -3,16 +3,17 @@ import { localDateTime } from '../../domain/dates.js'
 import { routineName } from '../../domain/plan.js'
 import {
   bestWeight,
-  completedVolume,
   doneUnits,
   entriesOf,
   entryRoutineId,
+  entryVolume,
   isWarmup,
   routineIdsOf,
   setsOf,
   setUnits,
   workoutVolume,
 } from '../../domain/sets.js'
+import { entryDbLoad } from '../../domain/dumbbells.js'
 import { isRecord, type Entry, type State } from '../../state/types.js'
 import { MANAGED_ENTRY_KEYS, setForTools } from '../../domain/workout-items.js'
 
@@ -71,7 +72,7 @@ export function workoutSummary(workout: Entry, state: State | null, exercises: E
   if (minutes !== undefined) out.durationMin = minutes
   out.exercises = entriesOf(workout).map((e) => entryName(exercises, e))
   out.sets = setCounts(workout)
-  out.volume = round(stored ?? workoutVolume(workout))
+  out.volume = round(stored ?? workoutVolume(workout, (id) => exercises.name(id)))
   if (prs.length) out.prs = prs.map((id) => exercises.name(id))
   if (finite(workout.bw) !== undefined) out.bodyWeight = workout.bw
   const note = str(workout.note)
@@ -99,7 +100,9 @@ export function workoutDetail(workout: Entry, state: State | null, exercises: Ex
     if (typeof e.rid === 'string' && e.rid) out.routineId = e.rid
     const rid = entryRoutineId(workout, e)
     if (rid && routineIdsOf(workout).length > 1) out.routineName = routineName(state, rid)
-    out.volume = round(sets.filter((s) => !isWarmup(s)).reduce((v, s) => v + completedVolume(s), 0))
+    out.volume = round(entryVolume(e, entryName(exercises, e)))
+    const meaning = entryDbLoad(e)
+    if (meaning !== 'as') out.weightMeans = meaning === 'each' ? 'per dumbbell' : 'both dumbbells together'
     const best = bestWeight(e, isAssisted(exercises, id))
     if (best > 0) out.bestWeight = best
     const other = Object.fromEntries(Object.entries(e).filter(([k]) => !MANAGED_ENTRY_KEYS.has(k) && e[k] !== null))

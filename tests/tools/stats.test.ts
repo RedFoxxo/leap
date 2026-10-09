@@ -108,7 +108,7 @@ describe('read_muscle_balance', () => {
     expect(r.json.untrained).toEqual([])
     expect(r.json.notCounted).toEqual(['9001'])
     const empty = await h.call('read_muscle_balance', { from: '2026-01-01', to: '2026-01-07' })
-    expect(empty.json).toMatchObject({ workouts: 0, muscles: [], untrained: ['biceps', 'glutes', 'pectorals'] })
+    expect(empty.json).toMatchObject({ workouts: 0, muscles: [], untrained: ['biceps', 'glutes', 'hamstrings', 'pectorals'] })
     await h.close()
   })
 })

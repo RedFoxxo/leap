@@ -28,6 +28,8 @@ export const LIST_KEYS = [
   'favEx',
   'equipProfiles',
   'gymCards',
+  'measurements',
+  'customMeasurements',
 ] as const
 
 /** Top-level keys whose default is an object map; never written as anything else. */
@@ -43,6 +45,11 @@ export const MAP_KEYS = [
   'balanceOverrides',
   'enParens',
   'enOnly',
+  'dayNotes',
+  'dbLoad',
+  'dumbbells',
+  'edited',
+  'deleted',
 ] as const
 
 /** The profile's weight unit; every stored weight is in it. The app defaults to kg. */

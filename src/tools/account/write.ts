@@ -47,7 +47,7 @@ export const writePasskeyName = defineTool({
 export const writePairingCode = defineTool({
   name: 'write_pairing_code',
   description:
-    'Make a pairing code for another device of this profile: the openGym phone app, or leap on another computer (`leap pair`). The code works once, within 5 minutes, and gives that device full access to the profile.',
+    'Make a pairing code for another device of this profile: the openGym phone app, or leap on another computer (`leap pair`). The code works once, within 5 minutes, and gives that device full access to the profile. A new code replaces any code made before that was not used yet.',
   input: {},
   async handler(_args, ctx) {
     const r = await ctx.http.request<{ code: string }>({ method: 'POST', path: '/api/pair/create' })

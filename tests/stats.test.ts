@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ExerciseIndex } from '../src/catalog/exercises.js'
-import { beatsWeight, bestSet, estimate1RM, exerciseSessions, muscleLoads, muscleName } from '../src/domain/stats.js'
+import { beatsWeight, bestSet, estimate1RM, exerciseSessions, formulaOf, muscleLoads, muscleName } from '../src/domain/stats.js'
 import { fixtureCatalog } from './fixtures/exercises.js'
 import { profile } from './fixtures/profile.js'
 
@@ -17,6 +17,45 @@ describe('estimate1RM', () => {
     expect(estimate1RM(100, 0)).toBeNull()
     expect(estimate1RM(100, 5, 'brzycki')).toBe(112.5)
     expect(estimate1RM(100, 5, 'lombardi')).toBe(117.5)
+  })
+})
+
+describe('estimate1RM, openGym 1.4.0 formulas', () => {
+  // Expected values computed with openGym's own estimate1RM (frontend/src/lib/onerm.js, v1.4.0).
+  it('matches the app for the four new formulas and the weighted blend', () => {
+    expect(estimate1RM(100, 5, 'oconner')).toBe(112.5)
+    expect(estimate1RM(100, 8, 'mayhew')).toBe(126.3)
+    expect(estimate1RM(100, 8, 'wathan')).toBe(127.7)
+    expect(estimate1RM(100, 10, 'lander')).toBe(134.1)
+    expect(estimate1RM(100, 8, 'weighted')).toBe(125.2)
+    expect(estimate1RM(100, 8, 'weighted', 2)).toBe(132.2)
+    expect(estimate1RM(100, 1, 'weighted', 1)).toBe(105.8)
+    expect(estimate1RM(100, 14, 'weighted', 2)).toBeNull()
+    expect(estimate1RM(100, 8, 'epley', 2)).toBe(estimate1RM(100, 8, 'epley'))
+  })
+
+  it('follows the formula picked in the profile, Epley otherwise', () => {
+    expect(formulaOf({ oneRmFormula: 'wathan' })).toBe('wathan')
+    expect(formulaOf({ oneRmFormula: 'weighted' })).toBe('weighted')
+    expect(formulaOf({ oneRmFormula: 'from-a-newer-app' })).toBe('epley')
+    expect(formulaOf(null)).toBe('epley')
+  })
+})
+
+describe('dumbbell meaning in history', () => {
+  it('reads sessions in the exercise’s current meaning and counts both bells per dumbbell', () => {
+    const state = {
+      dbLoad: { '0294': { mode: 'total', _ts: 1 } },
+      workouts: [
+        { id: 'a', d: '2026-10-01', entries: [{ id: '0294', target: { dbLoad: 'each' }, sets: [{ w: 20, r: 10, done: true }] }] },
+        { id: 'b', d: '2026-10-02', entries: [{ id: '0294', target: { dbLoad: 'total' }, sets: [{ w: 42, r: 10, done: true }] }] },
+      ],
+    }
+    const sessions = exerciseSessions(state, '0294', new ExerciseIndex(fixtureCatalog(), state))
+    expect(sessions.map((s) => [s.bestWeight, s.volume, s.weightRecord])).toEqual([
+      [40, 400, true],
+      [42, 420, true],
+    ])
   })
 })
 

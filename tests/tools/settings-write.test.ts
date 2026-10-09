@@ -19,7 +19,7 @@ describe('write_bodyweight', () => {
     expect(r.json).toEqual({ saved: true, revision: 21, date: '2026-09-30', weight: 78.9, unit: 'kg' })
     expect(doc().bodyweight.map((e: { d: string }) => e.d)).toEqual(['2026-09-01', '2026-09-28', '2026-09-30', '2026-10-05'])
     expect(doc().bodyweight[2]).toEqual({ d: '2026-09-30', w: 78.9, t: NOW })
-    const { _ts, _rev, bodyweight, ...rest } = doc()
+    const { _ts, _rev, _wid, bodyweight, ...rest } = doc()
     const { _ts: _a, bodyweight: _b, ...before } = profile()
     expect(rest).toEqual(before)
     expect(_ts).toBe(NOW)
@@ -60,8 +60,9 @@ describe('delete_bodyweight', () => {
   it('removes the day and says a delete can be undone by another device', async () => {
     const { h, doc } = await setup()
     const r = await h.call('delete_bodyweight', { date: '2026-09-28' })
-    expect(r.json).toMatchObject({ saved: true, deleted: { date: '2026-09-28', weight: 79 }, note: expect.stringMatching(/no record of deletions/) })
+    expect(r.json).toMatchObject({ saved: true, deleted: { date: '2026-09-28', weight: 79 }, note: expect.stringMatching(/records the deletion/) })
     expect(doc().bodyweight.map((e: { d: string }) => e.d)).toEqual(['2026-09-01', '2026-10-05'])
+    expect(doc().deleted).toEqual({ bodyweight: { '2026-09-28': expect.any(Number) } })
     await h.close()
   })
 
@@ -189,7 +190,27 @@ describe('write_document', () => {
     const r = await h.call('write_document', { key: 'barWeights', value: { '0025': 15 } })
     expect(r.isError, r.text).toBe(false)
     expect(doc().barWeights).toEqual({ '0025': 15 })
-    expect((await h.call('write_document', { key: 'plates', value: [1] })).text).toMatch(/plates must be an object/)
+    expect(doc().edited).toMatchObject({ 'barWeights.0025': NOW })
+    expect((await h.call('write_document', { key: 'enOnly', value: [1] })).text).toMatch(/enOnly must be an object/)
+    await h.close()
+  })
+
+  it('stamps every changed entry of a map that syncs entry by entry, and never drops one', async () => {
+    const { h, doc } = await setup({ ...profile(), plates: { kg: { list: [20, 10], _ts: 3 }, lb: { list: [45], _ts: 3 } } })
+    const r = await h.call('write_document', { key: 'plates', value: { kg: { list: [20, 10, 5] }, lb: { list: [45], _ts: 3 } } })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().plates).toEqual({ kg: { list: [20, 10, 5], _ts: NOW }, lb: { list: [45], _ts: 3 } })
+    expect((await h.call('write_document', { key: 'plates', value: { kg: { list: [20] } } })).text).toMatch(/cannot lose entries \(lb\)/)
+    expect((await h.call('write_document', { key: 'plates', value: [1] })).text).toMatch(/give the whole map/)
+    await h.close()
+  })
+
+  it('removes a top-level key for good, with the removal stamped', async () => {
+    const { h, doc } = await setup({ ...profile(), oldFlag: true })
+    await h.call('write_document', { key: 'oldFlag', value: null })
+    expect(doc()).not.toHaveProperty('oldFlag')
+    expect(doc().edited).toMatchObject({ oldFlag: NOW })
+    expect((await h.call('write_document', { key: 'edited', value: {} })).text).toMatch(/belongs to openGym/)
     await h.close()
   })
 

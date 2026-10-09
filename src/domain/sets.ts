@@ -1,4 +1,5 @@
 import { isRecord, type Entry } from '../state/types.js'
+import { volumeFactor } from './dumbbells.js'
 
 /**
  * How openGym reads a logged set row (docs/OPENGYM.md, "Workouts"). A row is a
@@ -76,11 +77,19 @@ export function setsOf(entry: Entry): Entry[] {
   return list(entry.sets)
 }
 
-/** Total completed volume of a workout, warm-ups excluded. */
-export function workoutVolume(workout: Entry): number {
-  let v = 0
-  for (const e of entriesOf(workout)) for (const s of setsOf(e)) if (!isWarmup(s)) v += completedVolume(s)
-  return v
+/** Completed volume of one entry, warm-ups excluded; a dumbbell entry logged per bell counts both bells. */
+export function entryVolume(entry: Entry, name = ''): number {
+  const f = volumeFactor(entry, name)
+  return setsOf(entry).reduce((v, s) => v + (isWarmup(s) ? 0 : completedVolume(s) * f), 0)
+}
+
+/**
+ * Total completed volume of a workout, warm-ups excluded, as openGym 1.4.0 counts it
+ * (`history.js` workoutVolume): `nameOf` gives an exercise's name, which tells a one-arm
+ * dumbbell exercise (one bell) from a two-handed one.
+ */
+export function workoutVolume(workout: Entry, nameOf: (id: string) => string = () => ''): number {
+  return entriesOf(workout).reduce((v, e) => v + entryVolume(e, nameOf(String(e.id))), 0)
 }
 
 /** Completed weights of an entry's work rows (each done side on its own). */
@@ -131,7 +140,7 @@ const pick = (from: Entry, keys: readonly string[]): Entry => {
 }
 
 const SIDE_KEYS = ['w', 'r', 'done', 'rir', 'rpe', 'type', 'drops', 'clusters'] as const
-const ROW_KEYS = ['w', 'r', 'done', 'rir', 'rpe', 'sec', 'min', 'speed', 'drops', 'clusters'] as const
+const ROW_KEYS = ['w', 'r', 'done', 'rir', 'rpe', 'sec', 'min', 'speed', 'incline', 'side', 'drops', 'clusters', 'failure', 'max'] as const
 
 /** A set row for tool output: what was logged, with its kind spelled out. */
 export function describeSet(set: Entry, index: number): Entry {

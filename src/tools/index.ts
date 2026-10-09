@@ -6,7 +6,9 @@ import { accountDeleteTools, accountExtraReadTools, accountWriteTools } from './
 import { adminTools } from './admin/tools.js'
 import { exerciseReadTools } from './exercises/read.js'
 import { exerciseDeleteTools, exerciseWriteTools } from './exercises/write.js'
+import { rotationWriteTools } from './routines/rotation.js'
 import { routineDeleteTools, routineWriteTools } from './routines/write.js'
+import { measurementDeleteTools, measurementReadTools, measurementWriteTools } from './settings/measurements.js'
 import { settingsDeleteTools, settingsWriteTools } from './settings/write.js'
 import { statsReadTools } from './stats/read.js'
 import { planReadTools } from './training/plan.js'
@@ -22,6 +24,7 @@ export function allTools(): AnyToolDef[] {
     ...profileReadTools,
     ...workoutReadTools,
     ...planReadTools,
+    ...measurementReadTools,
     ...statsReadTools,
     ...exerciseReadTools,
     ...mediaReadTools,
@@ -30,8 +33,10 @@ export function allTools(): AnyToolDef[] {
     ...accountExtraReadTools,
     ...workoutWriteTools,
     ...routineWriteTools,
+    ...rotationWriteTools,
     ...exerciseWriteTools,
     ...settingsWriteTools,
+    ...measurementWriteTools,
     ...mediaWriteTools,
     ...coachWriteTools,
     ...accountWriteTools,
@@ -39,6 +44,7 @@ export function allTools(): AnyToolDef[] {
     ...routineDeleteTools,
     ...exerciseDeleteTools,
     ...settingsDeleteTools,
+    ...measurementDeleteTools,
     ...mediaDeleteTools,
     ...coachDeleteTools,
     ...accountDeleteTools,

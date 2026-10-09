@@ -65,6 +65,25 @@ describe('write_routine', () => {
     await h.close()
   })
 
+  it('takes exercises of the 1.4.0 catalogue and stores an alias id as the exercise it draws', async () => {
+    const { h, routine } = await setup()
+    const r = await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025' }, { exerciseId: '0294' }, { exerciseId: '12001' }, { exerciseId: '12900', sets: 2 }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(routine(PUSH).ex.map((e: { id: string }) => e.id)).toEqual(['0025', '0294', '12001', '12001'])
+    await h.close()
+  })
+
+  it('stamps the changed fields as the app does and reports the edit as saved', async () => {
+    const state = profile()
+    ;(state.routines as any[])[0]._f = { name: 5 }
+    const { h, routine } = await setup(state)
+    const r = await h.call('write_routine', { id: PUSH, name: 'Push heavy', exercises: [{ exerciseId: '0025', weight: 85 }, { exerciseId: '0294' }] })
+    expect(r.json).toMatchObject({ saved: true })
+    expect(r.json).not.toHaveProperty('notPersisted')
+    expect(routine(PUSH)).toMatchObject({ name: 'Push heavy', _ts: NOW, _f: { name: NOW, ex: NOW } })
+    await h.close()
+  })
+
   it('removes a field with null', async () => {
     const { h, routine } = await setup()
     await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', warmupSets: null, progression: null, increment: null }, { exerciseId: '0294', superset: null }] })
@@ -94,6 +113,74 @@ describe('write_routine', () => {
       [{ exerciseId: 'crow', mode: 'reps' }, /is a cardio exercise/],
       [{ exerciseId: '0025', progression: 'time' }, /does not fit a reps exercise/],
       [{ exerciseId: 'cplank', mode: 'time', sec: 30, progression: 'linear' }, /does not fit a time exercise/],
+    ]
+    for (const [x, message] of refused) expect((await h.call('write_routine', { name: 'X', exercises: [x] })).text, JSON.stringify(x)).toMatch(message)
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('plans triple progression as the app does: a range and the most sets', async () => {
+    const { h, routine } = await setup()
+    const r = await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', progression: 'triple', reps: 12 }, { exerciseId: '0294' }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(routine(PUSH).ex[0]).toMatchObject({ prog: 'triple', reps: 12, repsMin: 10, sets: 4, setsMax: 6 })
+    const read = await h.call('read_routine', { id: PUSH })
+    expect(read.json.exercises[0]).toMatchObject({ progression: 'triple', setsMax: 6 })
+    expect((await h.call('write_routine', { id: PUSH, name: read.json.name, exercises: read.json.exercises })).json).toMatchObject({ unchanged: true })
+    expect((await h.call('write_routine', { id: PUSH, progression: 'triple' })).isError).toBe(false)
+    await h.close()
+  })
+
+  it('writes the 1.4.0 exercise options and removes them again', async () => {
+    const state = profile()
+    ;(state as any).dbLoad = { '0294': { mode: 'each', _ts: 1 } }
+    const { h, routine } = await setup(state)
+    const r = await h.call('write_routine', {
+      id: PUSH,
+      exercises: [
+        { exerciseId: '0025', lastSetToFailure: true, backoff: true, supersetName: 'Upper', supersetRestSec: 120 },
+        { exerciseId: '0294', dumbbellLoad: 'total' },
+        { exerciseId: '0043', pyramid: [12, 10, 7, 'max'], pyramidRestSec: [60, 90], pyramidWeight: [60, 70, 80, 0], perSide: false },
+      ],
+    })
+    expect(r.isError, r.text).toBe(false)
+    const [bench, curl, squat] = routine(PUSH).ex
+    expect(bench).toMatchObject({ lastToFailure: true, backoff: true, sgName: 'Upper', sgRest: 120 })
+    expect(curl).toMatchObject({ dbLoad: 'total', sgName: 'Upper', sgRest: 120 })
+    expect(squat).toMatchObject({ pyramid: [12, 10, 7, 'max'], sets: 4, reps: 12, pyramidRest: [60, 90, 0, 0], pyramidWeight: [60, 70, 80, 0] })
+    expect(squat).not.toHaveProperty('sgName')
+
+    await h.call('write_routine', {
+      id: PUSH,
+      exercises: [
+        { exerciseId: '0025', lastSetToFailure: false, backoff: null, supersetName: null },
+        { exerciseId: '0294', dumbbellLoad: 'each' },
+        { exerciseId: '0043', pyramid: null },
+      ],
+    })
+    const [b2, c2, s2] = routine(PUSH).ex
+    expect(b2).not.toHaveProperty('lastToFailure')
+    expect(b2).not.toHaveProperty('backoff')
+    expect(b2).not.toHaveProperty('sgName')
+    expect(c2).not.toHaveProperty('dbLoad')
+    expect(c2.sgRest).toBe(120)
+    expect(s2).not.toHaveProperty('pyramid')
+    expect(s2).not.toHaveProperty('pyramidRest')
+    // The second write comes after every stamp the first one left, whatever the clock says.
+    expect(routine(PUSH)._f).toMatchObject({ ex: NOW + 1 })
+    await h.close()
+  })
+
+  it('checks the 1.4.0 options as the app’s editor does', async () => {
+    const { h, fake } = await setup(withCardio())
+    const refused: [Record<string, unknown>, RegExp][] = [
+      [{ exerciseId: '0025', sets: 4, setsMax: 3 }, /setsMax \(3\).*must be above sets \(4\)/],
+      [{ exerciseId: 'cplank', mode: 'time', sec: 30, setsMax: 5 }, /setsMax is for exercises done in reps/],
+      [{ exerciseId: 'crow', lastSetToFailure: true }, /no last set to failure/],
+      [{ exerciseId: 'cplank', mode: 'time', sec: 30, pyramid: [10, 8] }, /pyramid is for exercises done in reps/],
+      [{ exerciseId: '0025', pyramid: [10, 8], backoff: true }, /pyramid plans every set itself/],
+      [{ exerciseId: '0025', backoff: true, intensifier: { type: 'restpause', totalReps: 20, restSec: 15 } }, /back-off sets do not fit, it is planned as rest-pause/],
+      [{ exerciseId: '0025', dumbbellLoad: 'each' }, /for dumbbell and kettlebell exercises/],
     ]
     for (const [x, message] of refused) expect((await h.call('write_routine', { name: 'X', exercises: [x] })).text, JSON.stringify(x)).toMatch(message)
     expect(fake.puts).toHaveLength(0)

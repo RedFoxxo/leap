@@ -79,10 +79,11 @@ describe('plan', () => {
   })
 
   it('lets a date override win and ignores deleted routines', () => {
-    expect(planFor(profile(), '2026-10-09')).toEqual({ routineIds: [], override: 'rest' })
-    expect(planFor(profile(), '2026-10-11')).toEqual({ routineIds: [PULL], override: 'routine' })
-    expect(planFor(profile(), '2026-10-12')).toEqual({ routineIds: [PUSH] })
-    expect(planFor({ ...profile(), routines: [] }, '2026-10-12')).toEqual({ routineIds: [] })
+    const today = '2026-10-07'
+    expect(planFor(profile(), '2026-10-09', today)).toEqual({ routineIds: [], override: 'rest', plannedBy: 'rest-override' })
+    expect(planFor(profile(), '2026-10-11', today)).toEqual({ routineIds: [PULL], override: 'routine', plannedBy: 'override' })
+    expect(planFor(profile(), '2026-10-12', today)).toEqual({ routineIds: [PUSH], plannedBy: 'weekday' })
+    expect(planFor({ ...profile(), routines: [] }, '2026-10-12', today)).toEqual({ routineIds: [], plannedBy: 'rest' })
   })
 })
 

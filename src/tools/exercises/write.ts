@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { customExercises } from '../../catalog/exercises.js'
 import { newId } from '../../state/ids.js'
+import { withoutStamps } from '../../state/stamps.js'
 import { apply, refuse } from '../../state/store.js'
 import { isRecord, listOf, mapOf, writableList, writableMap, type Entry } from '../../state/types.js'
 import { invalid } from '../respond.js'
@@ -8,13 +9,18 @@ import { entryId } from '../schema.js'
 import { defineTool } from '../types.js'
 import { change, RESURRECTION_NOTE } from '../write.js'
 
-/** Body parts and equipment of the exercise dataset, which the app offers for custom exercises. */
-const BODY_PARTS = ['back', 'cardio', 'chest', 'lower arms', 'lower legs', 'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'] as const
+/**
+ * Body parts and equipment the app offers for custom exercises: the catalogue's words, plus the
+ * accessories bench and pull-up bar (openGym `scripts/catalogue/validate.mjs` and
+ * `frontend/src/lib/equipment.js`, v1.4.0).
+ */
+const BODY_PARTS = ['back', 'cardio', 'chest', 'full body', 'lower arms', 'lower legs', 'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'] as const
 const EQUIPMENT = [
   'body weight', 'cable', 'leverage machine', 'assisted', 'medicine ball', 'stability ball', 'band', 'barbell', 'rope',
   'dumbbell', 'ez barbell', 'sled machine', 'upper body ergometer', 'kettlebell', 'olympic barbell', 'weighted',
   'bosu ball', 'resistance band', 'roller', 'skierg machine', 'hammer', 'smith machine', 'wheel roller',
   'stationary bike', 'tire', 'trap bar', 'elliptical machine', 'stepmill machine',
+  'suspension trainer', 'sandbag', 'landmine', 'weight plate', 'clubbell', 'macebell', 'bench', 'pull-up bar',
 ] as const
 /** The muscles the app's body map knows, head to toe; custom exercises store these names, in this order. */
 export const APP_MUSCLES = [
@@ -85,8 +91,11 @@ export const writeCustomExercise = defineTool({
         }
         const name = args.name ?? String(c.n ?? '')
         const lower = name.toLowerCase()
-        const taken = [...builtin.exercises.values()].find((e) => e.name.toLowerCase() === lower) ?? customExercises(draft).find((e) => e.id !== c.id && e.name.toLowerCase() === lower)
-        if (taken) return refuse(`"${taken.name}" already exists (${taken.id})`)
+        // As the app: only a new or changed name is checked, so an imported exercise may keep its own.
+        if (!args.id || lower !== String(c.n ?? '').toLowerCase()) {
+          const taken = [...builtin.exercises.values()].find((e) => e.name.toLowerCase() === lower) ?? customExercises(draft).find((e) => e.id !== c.id && e.name.toLowerCase() === lower)
+          if (taken) return refuse(`"${taken.name}" already exists (${taken.id})`)
+        }
         const bodyPart = args.bodyPart ?? String(c.bp ?? '')
         const oldPrimaries = Array.isArray(c.primaries) ? c.primaries.filter((m): m is string => typeof m === 'string') : []
         const oldSecondaries = Array.isArray(c.secondaries) ? c.secondaries.filter((m): m is string => typeof m === 'string') : []
@@ -123,7 +132,7 @@ export const writeCustomExercise = defineTool({
       {
         verify: (s, r) => {
           const stored = listOf(s, 'customEx').find((x) => x.id === r.exercise.id)
-          return stored && JSON.stringify(stored) === JSON.stringify(r.exercise) ? [] : [`custom exercise ${String(r.exercise.id)}`]
+          return stored && withoutStamps(stored) === withoutStamps(r.exercise) ? [] : [`custom exercise ${String(r.exercise.id)}`]
         },
       },
     )

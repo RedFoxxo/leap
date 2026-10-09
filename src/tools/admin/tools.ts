@@ -191,9 +191,21 @@ export const adminCoachConfig = defineTool({
       .optional()
       .describe('Daily job limits; 0 = no cap. A limit not given stays as it is'),
     maxMessageLen: z.number().int().min(200).max(4000).optional(),
+    outputLimit: z.number().int().min(1024).max(65536).optional().describe("The most the Coach may write in one answer, in the model's output tokens (default 16000)"),
+    headers: z
+      .record(z.string().regex(/^[!#$%&'*+\-.^_`|~0-9a-z]{1,64}$/i), z.string().trim().min(1).max(500))
+      .nullable()
+      .optional()
+      .describe('Extra routing headers for a compatible endpoint (at most 8), e.g. { "X-Title": "openGym" }; null clears them. Never credentials: those are filed in the app'),
   },
   async handler(args, ctx) {
-    const body: Record<string, unknown> = Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined))
+    if (args.headers && Object.keys(args.headers).length > 8) return invalid('at most 8 headers')
+    const secretLike = Object.entries(args.headers ?? {})
+      .filter(([n, v]) => /auth|key|token|secret|cookie|password/i.test(n) || /^(bearer|basic)\s|^(sk|pk|rk)-|^gh[pousr]_|^xox[abp]-/i.test(v))
+      .map(([n]) => n)
+    if (secretLike.length) return invalid(`${secretLike.join(', ')} looks like a credential; credentials are filed in the app, never through leap`)
+    const { outputLimit, ...rest } = args
+    const body: Record<string, unknown> = Object.fromEntries(Object.entries({ ...rest, ...(outputLimit !== undefined ? { maxOutputTokens: outputLimit } : {}) }).filter(([, v]) => v !== undefined))
     if (!Object.keys(body).length) return invalid('nothing to change')
     if (args.caps) {
       // openGym rebuilds both limits from what is sent and turns a missing one into 0, "no limit".

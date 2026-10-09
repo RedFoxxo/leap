@@ -4,7 +4,22 @@ An MCP server for [openGym](https://github.com/DuarteSantos8/openGym): lets AI
 assistants log, edit and analyze your workouts, routines, body weight and PRs on
 your self-hosted instance, through openGym's own HTTP API.
 
-Version 1.0.0. See [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](CHANGELOG.md) for what each version brings.
+
+## Compatibility
+
+Each leap release works with a range of openGym versions. openGym's API does
+not report its version, so leap tells it from what the server answers
+(`read_instance` shows it) and refuses to write to a server that is too old.
+
+| leap | openGym |
+|---|---|
+| 1.1.0 (next) | 1.4.0 or later (tested with 1.4.0) |
+| 1.0.0 | 1.3.9 |
+
+Raising the oldest supported openGym is called out in the changelog.
+`npx -y @redfoxxo/leap@1` runs the newest 1.x release, which needs openGym
+1.4.0; with an older openGym, use `@redfoxxo/leap@1.0.0` until you update it.
 
 ## Why leap
 
@@ -13,7 +28,8 @@ Version 1.0.0. See [CHANGELOG.md](CHANGELOG.md).
 - **Runs on your machine, talks to your server.** No SSH, no extra container,
   nothing to install on the server. leap signs in like the phone app does.
 - **Safe writes.** openGym stores a profile as one document. leap changes only
-  what you asked for, keeps every field it does not know, and refuses to
+  what you asked for, keeps every field it does not know, stamps every change
+  the way the app does so devices merge it field by field, and refuses to
   overwrite changes made on another device in the meantime.
 - **Simple permissions.** Tools are grouped by tier, so an MCP client needs one
   rule per tier.
@@ -21,7 +37,8 @@ Version 1.0.0. See [CHANGELOG.md](CHANGELOG.md).
 ## Requirements
 
 - Node.js 22.12 or newer (`npx` comes with it)
-- An openGym instance reachable over https
+- An openGym instance reachable over https, version 1.4.0 or later (see
+  [Compatibility](#compatibility))
 - A token: in openGym open **Settings → Pair the mobile app**, then run
 
   ```sh
@@ -43,12 +60,9 @@ Keep the token out of config files: export it in your shell profile
 
 ## Network and files
 
-- leap talks to your instance only. The one exception: the names, muscles and
-  instructions of openGym's built-in exercises are not served by the openGym
-  API, so leap downloads them once from the MIT
-  [exercise dataset](https://github.com/hasaneyldrm/exercises-dataset) openGym
-  itself uses (a pinned version, hash-checked, about 17 MB) and caches a small
-  copy in `~/.cache/leap`. No token or profile data is sent there.
+- leap talks to your instance only. openGym's exercise catalogue (5,632
+  exercises: names, muscles, steps; never pictures or animations) ships with
+  leap, taken from the openGym release it supports.
 - Photos and videos are read from paths you name, and only if they really are
   JPEG, PNG, WebP, GIF, MP4, MOV or WebM. Photos lose their metadata (where and
   when they were taken, the camera) before upload, keeping their rotation;
@@ -92,19 +106,21 @@ Keep the token out of config files: export it in your shell profile
 ## Tools
 
 **read**: `read_profile`, `read_settings`, `read_workouts`, `read_workout`, `read_routines`, `read_routine`,
-`read_week_plan`, `read_bodyweight`, `read_exercise_history`, `read_records`,
+`read_week_plan`, `read_bodyweight`, `read_measurements`, `read_exercise_history`, `read_records`,
 `read_training_summary`, `read_muscle_balance`, `read_exercises`, `read_exercise`,
 `read_media_usage`, `read_coach`, `read_coach_cohort`,
 `read_account`, `read_me`, `read_instance`, `read_document`
 
 **write**: `write_log_workout`, `write_update_workout`, `write_routine`, `write_copy_routine`, `write_week_plan`,
-`write_day_plan`, `write_custom_exercise`, `write_bodyweight`, `write_goal_weight`, `write_settings`,
-`write_exercise_note`, `write_favourite`, `write_attach_media`, `write_download_media`, `write_coach_request`,
+`write_day_plan`, `write_rotation`, `write_schedule_mode`, `write_rotation_round`, `write_session_queue`,
+`write_day_note`, `write_custom_exercise`, `write_bodyweight`, `write_measurement`, `write_goal_weight`,
+`write_settings`, `write_exercise_note`, `write_favourite`, `write_dumbbell_rack`, `write_dumbbell_load`,
+`write_attach_media`, `write_download_media`, `write_coach_request`,
 `write_coach_resolve`, `write_coach_share`, `write_passkey_name`, `write_pairing_code`,
 `write_document`
 
 **delete**: `delete_workout`, `delete_routine`, `delete_custom_exercise`,
-`delete_bodyweight`, `delete_media`, `delete_media_sweep`, `delete_coach_data`, `delete_all_sessions`
+`delete_bodyweight`, `delete_measurement`, `delete_media`, `delete_media_sweep`, `delete_coach_data`, `delete_all_sessions`
 
 **admin** (admin profiles only): `admin_users`, `admin_user`, `admin_disable_user`,
 `admin_delete_user`, `admin_password_reset`, `admin_invites`, `admin_create_invite`,
@@ -123,5 +139,7 @@ Keep the token out of config files: export it in your shell profile
 
 ## License
 
-MIT. leap is an independent client of the openGym API and contains no openGym
-code. openGym itself is AGPL-3.0-or-later.
+AGPL-3.0-or-later, like openGym itself (see [LICENSE](LICENSE) and
+[NOTICE.md](NOTICE.md)). leap includes openGym's exercise catalogue (text only,
+never its pictures or animations) and follows its sync rules. Versions up to
+and including 1.0.0 were released under the MIT License.

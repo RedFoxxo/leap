@@ -10,7 +10,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const NAME = 'leap-opengym-test'
-const IMAGE = process.env.OPENGYM_IMAGE ?? 'ghcr.io/duartesantos8/opengym-api:latest'
+// The openGym release this leap is tested with (OPENGYM.tested in src/version.ts; a test keeps them equal).
+const IMAGE = process.env.OPENGYM_IMAGE ?? 'ghcr.io/duartesantos8/opengym-api:1.4.0'
 const PORT = Number(process.env.OPENGYM_TEST_PORT ?? 3999)
 const ORIGIN = `http://localhost:${PORT}`
 const DIR = resolve('.cache/test-server')

@@ -28,6 +28,15 @@ export const ITEM_FIELDS = [
   ['perSide', 'side'],
   ['assisted', 'assisted'],
   ['intensifier', 'intensifier'],
+  ['setsMax', 'setsMax'],
+  ['lastSetToFailure', 'lastToFailure'],
+  ['backoff', 'backoff'],
+  ['pyramid', 'pyramid'],
+  ['pyramidRestSec', 'pyramidRest'],
+  ['pyramidWeight', 'pyramidWeight'],
+  ['dumbbellLoad', 'dbLoad'],
+  ['supersetName', 'sgName'],
+  ['supersetRestSec', 'sgRest'],
 ] as const
 
 /** Stored fields leap understands; anything else on an item is openGym's own and is kept as it is. */
@@ -37,11 +46,30 @@ export type ItemMode = 'reps' | 'time' | 'cardio'
 
 /** Progression policies the app offers per logging mode, and at routine level. */
 export const POLICIES_FOR: Record<ItemMode, readonly string[]> = {
-  reps: ['off', 'linear', 'greyskull', 'double'],
+  reps: ['off', 'linear', 'greyskull', 'double', 'triple'],
   time: ['off', 'time'],
   cardio: ['off'],
 }
-export const ROUTINE_POLICIES = ['off', 'linear', 'greyskull', 'double'] as const
+export const ROUTINE_POLICIES = ['off', 'linear', 'greyskull', 'double', 'triple'] as const
+
+/** Most sets a pyramid or triple progression plans (openGym pyramid.js, progression.js, v1.4.0). */
+export const MAX_PLANNED_SETS = 10
+
+/** A pyramid as the app keeps it: whole reps of at least 1 or "max", per side rounded up to even, at most 10 (pyramid.js normalizePyramid). */
+export function normalizePyramid(list: readonly (number | 'max')[], perSide: boolean): (number | 'max')[] {
+  return list.slice(0, MAX_PLANNED_SETS).map((v) => {
+    if (v === 'max') return v
+    const r = Math.max(1, Math.round(v))
+    return perSide && r % 2 ? r + 1 : r
+  })
+}
+
+/** A per-set list aligned to the pyramid (missing values 0), or undefined when every value is 0: not stored. */
+export function alignedOrNone(values: readonly number[] | undefined, length: number, step: (v: number) => number): number[] | undefined {
+  if (!values) return undefined
+  const out = Array.from({ length }, (_, i) => step(Math.max(0, values[i] ?? 0)))
+  return out.some((v) => v > 0) ? out : undefined
+}
 
 /** What the app gives a freshly added exercise (its defaultConfig). */
 export function defaultItem(id: string, mode: ItemMode, bodyweight: boolean): Entry {

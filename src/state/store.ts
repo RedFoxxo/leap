@@ -1,6 +1,7 @@
 import type { HttpCore } from '../http/core.js'
 import { err, ok, type Err, type Result } from '../http/result.js'
 import type { BackupWriter } from './backup.js'
+import { stampChange, stampTime } from './stamps.js'
 import { isRecord, LIST_KEYS, MAP_KEYS, type Snapshot, type State } from './types.js'
 
 /** What a change function decides: apply (with a result to report) or refuse (nothing is sent). */
@@ -58,9 +59,20 @@ function refused(message: string): Err {
   return e
 }
 
+/**
+ * openGym answers 503 "state unreadable" when its stored profile file cannot be read: nothing was
+ * written, unlike a 503 from a proxy in front of it.
+ */
+function unreadable(r: Err): Err | undefined {
+  if (r.status !== 503 || !/state unreadable/i.test(r.message)) return undefined
+  return err(503, 'openGym cannot read the stored profile (its data file is damaged or unreadable); nothing was written. The instance admin has to look at the server', r.body, r.request)
+}
+
 export interface StoreOptions {
   backup?: BackupWriter
   now?: () => number
+  /** Checked before every write: whether the server is an openGym version leap can write to. */
+  server?: () => Promise<{ ok: true } | { ok: false; message: string }>
 }
 
 /**
@@ -71,6 +83,7 @@ export interface StoreOptions {
 export class StateStore {
   private readonly backup: BackupWriter | undefined
   private readonly now: () => number
+  private readonly server: StoreOptions['server']
 
   constructor(
     private readonly http: HttpCore,
@@ -78,11 +91,12 @@ export class StateStore {
   ) {
     this.backup = options.backup
     this.now = options.now ?? Date.now
+    this.server = options.server
   }
 
   async load(): Promise<Result<Snapshot>> {
     const r = await this.http.request<{ state: unknown; rev?: number }>({ method: 'GET', path: '/api/data' })
-    if (!r.ok) return r
+    if (!r.ok) return unreadable(r) ?? r
     const state = r.data?.state
     if (state !== null && state !== undefined && !isRecord(state)) {
       return err(r.status, 'openGym returned a profile document that is not an object', JSON.stringify(state).slice(0, 200))
@@ -91,6 +105,10 @@ export class StateStore {
   }
 
   async update<R>(mutate: Mutate<R>, options: UpdateOptions<R> = {}): Promise<Result<Written<R>>> {
+    if (this.server) {
+      const supported = await this.server()
+      if (!supported.ok) return refused(supported.message)
+    }
     let base = await this.load()
     if (!base.ok) return base
     let retries = 0
@@ -101,7 +119,7 @@ export class StateStore {
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const { state: current, rev } = base.data
-      const now = Math.max(this.now(), (typeof current?._ts === 'number' ? current._ts : 0) + 1)
+      const now = stampTime(current, this.now())
       const draft: State = current ? structuredClone(current) : {}
       const decided = mutate(draft, { now })
       if (!decided.ok) return refused(decided.message)
@@ -111,12 +129,17 @@ export class StateStore {
         return ok({ result: decided.result, rev, retries, notPersisted: [], verified: true, warnings, unchanged: true })
       }
 
+      const problems = checkDocument(draft, current, options)
+      if (problems.length > 0) return refused(`leap would write an invalid document, so nothing was sent: ${problems.join('; ')}`)
+      stampChange(current, draft, now)
       draft._ts = now
       delete draft._rev
       delete draft.active
-      const problems = checkDocument(draft, current, options)
-      if (problems.length > 0) return refused(`leap would write an invalid document, so nothing was sent: ${problems.join('; ')}`)
-      const body = JSON.stringify({ state: draft, baseRev: rev })
+      delete draft._unstamped
+      delete draft._prior
+      const payload: Record<string, unknown> = { state: draft, baseRev: rev, stamped: true }
+      if (typeof current?._wid === 'string') payload.baseWid = current._wid
+      const body = JSON.stringify(payload)
       if (Buffer.byteLength(body) > MAX_DOCUMENT_BYTES) {
         return refused(`the profile would exceed openGym's 5 MiB limit (${Buffer.byteLength(body)} bytes)`)
       }
@@ -129,10 +152,12 @@ export class StateStore {
         }
       }
 
-      const put = await this.http.request<{ ok: boolean; rev: number }>({ method: 'PUT', path: '/api/data', json: { state: draft, baseRev: rev } })
+      const put = await this.http.request<{ ok: boolean; rev: number }>({ method: 'PUT', path: '/api/data', json: payload })
       if (put.ok) {
         return ok(await this.readBack(decided.result, put.data.rev, now, retries, backup, warnings, options), put.status)
       }
+      const cannotRead = unreadable(put)
+      if (cannotRead) return cannotRead
 
       // No answer, or a proxy in front of openGym that gave up: the write may still have been saved.
       const unknown = put.status === 0 || GATEWAY_ERRORS.has(put.status)
@@ -214,8 +239,11 @@ export function checkDocument(draft: State, before: State | null, options: { all
   return problems
 }
 
-/** Keys only openGym itself writes: the "reset everything" stamp and the Coach's consent and state. */
-const OWN_BOOKKEEPING = ['resetAt', 'resetIds', 'coach'] as const
+/**
+ * Keys only openGym itself writes: the "reset everything" stamp, the Coach's consent and state, and
+ * the sync records (leap's own stamping adds to those after this check, see stamps.ts).
+ */
+const OWN_BOOKKEEPING = ['resetAt', 'resetIds', 'coach', 'deleted', 'edited', 'undone', '_wid', '_wids'] as const
 
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)

@@ -1,11 +1,12 @@
 # openGym: what leap relies on
 
-How openGym stores a profile and syncs it, as far as leap depends on it. Written
-in our own words from reading openGym's source; no openGym code is copied (see
-"Licensing rule" in `CLAUDE.md`).
+How openGym stores a profile and syncs it, as far as leap depends on it, from
+reading openGym's source. Where leap ports openGym logic, the code names the
+source file and commit (see "Licensing rule" in `CLAUDE.md`).
 
-Researched at openGym commit `31c6795b` (2026-10-06, API 1.3.9). Paths below are
-relative to the openGym repository at that commit. Re-check them when openGym
+Researched at openGym commit `31c6795b` (2026-10-06, API 1.3.9) and brought up
+to **v1.4.0** (`28b7e4dc`, 2026-10-09). Paths below are relative to the openGym
+repository at v1.4.0 unless a section says otherwise. Re-check them when openGym
 releases a version that touches sync, the state shape or `api/server.js`.
 
 Evidence key: **source** = read in openGym's code; **live** = verified against
@@ -15,10 +16,20 @@ the API image in `scripts/test-server.mjs`.
 
 - One JSON document per profile, `GET /api/data` → `{ state, rev }`. `state` is
   `null` before the first sync. (**source**: `api/server.js`, `GET /api/data`)
-- `PUT /api/data { state, baseRev }` **replaces the whole document**. A key
-  missing from `state` is gone afterwards. (**source**: `api/server.js` ~2005-2073)
-- With `baseRev` the write is conditional: a stale `baseRev` answers
-  `409 { error: "conflict", rev, state }` with the current document.
+- `PUT /api/data { state, baseRev, baseWid?, stamped? }` replaces the document.
+  For a **stamping** writer (`stamped: true`, the app and leap) a key missing from
+  `state` is gone afterwards; for a writer that does not stamp, the server puts
+  back every key and entry field it left out (except a short list v1.3.9 itself
+  drops) and stamps the change at server time (`api/sync-stamps.js` stampPut,
+  `api/server.js` ~2195-2291).
+- With `baseRev` the write is conditional: a stale `baseRev`, or a `baseWid`
+  that is not the stored document's `_wid` (a restored backup that reached the
+  same revision), answers `409 { error: "conflict", rev, state }`.
+- The answer is `{ ok, ts, rev, wid }`; `GET /api/data/rev` gives `{ rev, wid }`.
+  A stored file that cannot be read answers `503 { error: "state unreadable" }`
+  to GET and PUT (nothing written). `GET /api/health` carries `writable` from
+  1.4.0 on, and answers 503 `{ ok: false, writable: false }` when the data folder
+  cannot be written: leap tells openGym 1.4.0 from older servers by that field.
 - The server refuses (400) a `state` that is an array, has nothing but `_rev` /
   `_ts`, or has `workouts` / `routines` that are not arrays or null. Non-object
   entries inside those two arrays are silently dropped.
@@ -58,50 +69,48 @@ Main keys (default in brackets):
 | `barWeights`, `plates`, `loadKind`, `gymCards`, `balanceTemplate`, `balanceOverrides`, ... | Equipment and feature data |
 | `coach` | Coach consent and state; preserve as is |
 | `resetAt`, `resetIds` | "Reset everything" stamp; preserve as is |
+| `edited`, `deleted`, `undone`, `_wid`, `_wids` | Sync records (see below); `_unstamped`/`_prior` are server-only and never sent |
+| `queue` (`null`), `rotation` (`null`), `scheduleMode` (`null`) | The live round, the saved rotation, the plan mode (see "Rotation and the session queue") |
+| `dayNotes` (`{}`) | ISO date → `{ tag?, text?, _ts }`: missed-day notes |
+| `measurements` (`[]`), `measurementEnabled` (`null`), `customMeasurements` (`[]`) | Body measurements |
+| `dbLoad` (`{}`), `dumbbells` (`{}`) | What a dumbbell weight means per exercise; the owned dumbbells per unit |
+| `oneRmFormula` | `epley` (default), `brzycki`, `lombardi`, `oconner`, `mayhew`, `wathan`, `lander`, `weighted` |
+| `reminder.nudge` (false), `reminder.tone` (`friendly`) | Missed-workout nudge and its tone (`friendly`, `guilt`, `drill`) |
 
 leap must keep every key it does not know, unchanged.
 
 ## Sync between devices
 
-(**source**: `frontend/src/lib/sync-merge.js` header and `mergeStates`;
-`frontend/src/store/useStore.js`)
+(**source**: `frontend/src/lib/sync-merge.js`, `api/sync-stamps.js`,
+`frontend/src/store/useStore.js`; the sync rework landed in v1.3.10)
 
 - The app polls `GET /api/data/rev` every 30 s while open and on focus/resume,
-  and pushes about 1.5 s after a local change, always with `baseRev`.
-- When the revision changed and the device has **no unsent change**, it adopts
-  the server document as it is. A leap write then simply shows up.
-- When the device **has** unsent changes it merges the two copies:
-  - Top-level `_ts` decides scalars and settings, `week`, `dayPlan`, `reminder`:
-    the copy with the newer `_ts` wins.
-  - `workouts`, `routines`, `customEx`: union by `id`; for an id both copies
-    have, the version with the newer per-entry `_ts` wins (the newer copy's on
-    a tie).
-  - `bodyweight`: union by day; for a day both have, the newer `t` wins.
+  compares `rev` and `wid`, and pushes about 1.5 s after a local change with
+  `{ state, stamped: true, baseRev, baseWid }`.
+- It takes the server copy as it is when that copy descends from the one it last
+  synced and it owes nothing; otherwise it merges the two copies by their stamps:
+  - `edited`: per setting (`restSec`, `queue`, …) and per key of `week`,
+    `dayPlan`, `exNotes`, `barWeights` (`"week.3"`, `"dayPlan.2026-10-08"`), plus
+    `routineOrder`: the later stamp wins, a removal included.
+  - `workouts`, `routines`, `customEx`, `equipProfiles`, `gymCards`: union by id;
+    per field, the side with the later `_f[field]` wins; fields nobody stamped
+    follow the entry with the later `_ts`.
+  - `bodyweight`, `measurements`: union by day, the later `t` wins.
+  - Stamped maps (`balanceOverrides`, `loadKind`, `plates`, `dbLoad`,
+    `dumbbells`, `dayNotes`): per key, the entry with the later `_ts` wins; a
+    cleared entry is a stamped entry, never a deleted key.
+  - `deleted[list][key]`: a positive stamp removes the entry when it is at least
+    the entry's own time; a negative one records it was added back; a star in
+    `favEx` is always an add-back.
   - `exWeights`: per exercise, the better weight.
-  - `favEx`: set union. `exNotes`, `barWeights`: key union.
-- **There are no tombstones.** An entry deleted on one device while another
-  device holds unsent changes comes back on that device's merge. openGym
-  documents this as a known limit. leap's delete tools say so and verify.
-
-**Verified** (2026-10-07) by running openGym's own `mergeStates` over
-documents leap wrote, against a phone copy holding an unsynced change made
-before and after leap's write: logged and edited workouts, routines, custom
-exercises, weigh-ins and exercise notes survive in both cases, and PR badges
-stay consistent. Settings, the week plan and date overrides survive only when
-the phone's change was made before leap's write; made after, the phone's copy
-is newer and its values win as a whole (the same happens between two app
-devices). Deleted workouts come back in both cases (no tombstones). The
-affected tools say so in their descriptions.
-
-What leap does on every write:
-
-1. Read the document and its `rev`.
-2. Change only what was asked, on a copy, keeping every other key and field.
-3. Set the top-level `_ts` to `max(now, previous _ts + 1)`.
-4. Stamp the changed entry: `_ts = now` on a workout, routine or custom
-   exercise; `t = now` on a weigh-in.
-5. `PUT` with `baseRev`. On 409, redo step 2 on the document the 409 returned.
-6. Read back and report anything that did not persist.
+- How a change is stamped, in one time `now = max(clock, highest stamp + 1)`:
+  ported to leap as `src/state/stamps.ts` (openGym `stampChange`). leap's port
+  was compared with openGym's own `stampChange` on 4,000 randomised changes, with
+  no difference (2026-10-09).
+- **Old devices**: a phone still on openGym 1.3.9 does not stamp. Its stale
+  values can overwrite newer settings when it never read an updated copy, and
+  its merge can bring back an entry deleted elsewhere. Only then can a leap
+  change or delete be undone; the tools say so.
 
 ## Ids
 
@@ -133,19 +142,27 @@ A logged workout:
 
 Set rows (`sets[]`):
 
-- Normal: `{ w, r, done }`, optional `rir` or `rpe`.
+- Normal: `{ w, r, done }`, optional `rir` or `rpe`; `failure: true` (taken to
+  failure, RIR 0 unless rated; never on a warm-up), `max: true` (a pyramid's Max set).
 - Warm-up: `phase: "warmup"`. Excluded from volume, PRs and muscle balance.
 - Drop set: `type: "dropset"` with `drops: [{ w, r }]`; drops add to volume.
 - Rest-pause: `type: "restpause"` with `clusters: [{ r, restSec }]`; `r` is the
   total reps, clusters add nothing extra.
 - Per side: `sides: { L, R }`, with the row's own fields mirroring them.
-- Timed: `{ sec, w }`. Cardio: `{ min, speed }`, speed always in km/h.
-- No "failure" type (that is RIR 0) and no "assisted" set type (assistance is a
-  property of the exercise; its weight improves downwards).
+- Timed: `{ sec, w }`; a hold per side is two rows `side: "L"` and `side: "R"`.
+  Cardio: `{ min, speed, incline? }`, speed always in km/h, incline in % (0–40).
+- No "assisted" set type (assistance is a property of the exercise; its weight
+  improves downwards). Rows also carry app fields leap keeps as they are
+  (`at`, `planSec`, `weightOrigin`, …).
+- An entry's `target.dbLoad` (`each`/`total`) says what its weights meant; the
+  app stamps it on sessions of a dumbbell exercise whose meaning is not "as
+  entered" (`frontend/src/lib/dumbbells.js`, `session-start.js`).
 
 Derived when a workout is finished:
 
-- `vol`: sum of `w × r` over done, non-warm-up rows, plus their drops.
+- `vol`: sum of `w × r` over done, non-warm-up rows, plus their drops; an entry
+  logged per dumbbell (`target.dbLoad: "each"`) on two-handed work counts twice
+  (one bell when per side or named one-arm/single-arm).
 - `topW` per entry: best completed working weight.
 - `prs`: exercises whose best weight beats every earlier workout's best.
 - `exWeights[id]`: updated when the new weight is better (not for back-dated
@@ -193,8 +210,12 @@ openGym's demo profile (`lib/demoSeed.js`).
 Exercise items: `{ id, sets }` plus optional `reps`, `repsMin`, `repsMax`,
 `weight`, `sec`, `min`, `speed`, `mode`, `bodyweight`, `side`, `assisted`,
 `prog`, `inc`, `deloadFactor`, `restSec`, `warmupRestSec`, `warmupSets`, `sg`
-(superset group id), `note`, `intensifier`. (**source**: `views/sheets.jsx`
-routine editor, `lib/plan-share.js`)
+(superset group id), `note`, `intensifier`, and from 1.4.0 `setsMax` (triple
+progression), `lastToFailure`, `backoff`, `pyramid` (reps or `"max"` per set,
+≤ 10), `pyramidRest`, `pyramidWeight`, `dbLoad` (`as`/`each`/`total`), `sgName`
+and `sgRest` (on every member of a superset). (**source**: `views/sheets.jsx`
+routine editor, `lib/plan-share.js`, `lib/pyramid.js`, `lib/backoff.js`,
+`lib/superset-meta.js`)
 
 How the app's editor writes them (**source**: `sheets.jsx` ~1430-1450,
 `lib/history.js` `defaultConfig`, `lib/rep-range.js`, `lib/progression.js`):
@@ -209,9 +230,16 @@ How the app's editor writes them (**source**: `sheets.jsx` ~1430-1450,
   to `reps` (top). `repsMax` is something else: for body-weight work without
   added weight, the reps at which a set is added; never below `reps`.
 - Per side, `reps` is the total of both sides and is kept even.
-- Policies: reps `off|linear|greyskull|double` (default linear), timed
-  `off|time`, cardio `off`; at routine level the first four. `deloadFactor`
-  at most 0.95 (default 0.9).
+- Policies: reps `off|linear|greyskull|double|triple` (default linear), timed
+  `off|time`, cardio `off`; at routine level the reps ones. `deloadFactor`
+  at most 0.95 (default 0.9). Triple progression: choosing it sets `setsMax` to
+  `min(10, sets + 2)`; `setsMax` is stored only above `sets`.
+- A pyramid sets `sets` to its length and `reps` to its first number, drops
+  intensifier, back-off, last set to failure and `setsMax`, and is never
+  progressed. `pyramidRest`/`pyramidWeight` are aligned to it and stored only
+  when some value is above 0. Back-off sets fit reps exercises with weight, not
+  assistance machines or rest-pause. `dbLoad` is stored only for dumbbell or
+  kettlebell exercises and only when it differs from the exercise's default.
 - A routine with `excludeFromProgression` gives each session entry
   `noProg: true` (deload weeks).
 - Routines are stamped (`_ts`) when changed; an unchanged save is not stamped.
@@ -239,33 +267,44 @@ holds `muscleWeights` derived by its muscle map; leap writes `n`, `bp`,
 
 ## Built-in exercise catalogue
 
-1,324 exercises in `frontend/src/lib/exercises-data.js`, ids are 4-digit
-strings (`"0001"`), with name `n`, body part `bp`, equipment `eq`, target `tg`,
-secondary muscles `sm` and instructions. No API serves it.
+Since 1.4.0 openGym keeps its own catalogue in `catalogue/exercises/<id>.json`
+(one file per exercise, English text) and builds the app's data from it
+(`scripts/catalogue/build.mjs`). No API serves it. 5,632 exercises (ids of 4 or
+5 digits) plus 922 alias ids (`{ id, variantOf }`, a female drawing of another
+exercise; the app stores the main id). Fields: `name`, `bodyPart` (adds `full
+body`), `equipment` (adds suspension trainer, sandbag, landmine, weight plate,
+clubbell, macebell), `target`, `secondaryMuscles`, `category`, `description`,
+`instructions`, `textSource`, optional `muscleMap`. The 1,324 entries marked
+`textSource: "exercisedb"` kept their ids, names and muscles.
 
-Licensing (`NOTICE.md`): the English metadata comes from
-`hasaneyldrm/exercises-dataset` under MIT (originally ExerciseDB). openGym's
-translations are AGPL. The images and GIFs are third-party content licensed to
-nobody downstream. leap does **not** bundle any of it; names are looked up from
-the upstream MIT dataset at runtime.
+leap ships the text in `data/exercises.json` (generated by
+`scripts/build-catalogue.mjs` from a release tag). Licensing (`NOTICE.md` in
+both projects): the `exercisedb` entries' names, muscles and instructions are
+MIT; everything else is openGym's AGPL. The pictures and animations are licensed
+from Gym visual for openGym only and are never part of leap.
 
-The upstream dataset (`data/exercises.json`, pinned at commit `7455efae`,
-SHA-256 `65663422…`) has the same 1,324 ids as openGym's catalogue, with the
-same names except four where upstream mis-encodes "°" as "в°" (`0738`, `0739`,
-`0740`, `1464`), and the same targets (**verified** by comparing both files).
-Its fields: `name`, `body_part`, `equipment`, `target`, `muscle_group`,
-`secondary_muscles`, `instruction_steps` per language. openGym's own muscle
-mapping for Stats (`exercise-muscle-*.json`) is AGPL and not used by leap, so
-leap's muscle figures are based on `target` and `secondary_muscles` and can
-differ from the app's.
+The app's library search matches every query word in the name and also in
+target, equipment, body part and secondary muscles, with gym shorthand,
+plurals, run-together names and typos for words nothing has literally
+(`frontend/src/lib/exercises.js` searchExercises); leap's `src/catalog/search.ts`
+does the same in its own words.
 
 ## Stats
 
 (**source**: `frontend/src/lib/onerm.js`, `muscles.js`, `progression.js`)
 
-- Estimated 1RM: Epley `w × (1 + r/30)` by default; Brzycki `w × 36/(37 − r)`;
-  Lombardi `w × r^0.1`. One rep is the weight itself; above 12 reps there is no
-  estimate; rounded to 0.1.
+- Estimated 1RM, by the profile's `oneRmFormula` (default Epley): Epley,
+  Brzycki, Lombardi, O'Conner, Mayhew, Wathan, Lander, or `weighted`, a blend of
+  the seven plus an RTS %1RM table that counts reps plus RIR, up to 15. One rep
+  (without RIR) is the weight itself; a single formula gives nothing above 12
+  reps and ignores RIR; rounded to 0.1. Ported as `src/domain/stats.ts`
+  (`frontend/src/lib/onerm.js`), checked against openGym's own values.
+- Dumbbell meanings: history, records and 1RM read an exercise's sessions in
+  its current meaning (its `dbLoad` default, else the last stamped session's,
+  else as entered), converting `each`↔`total` by the number of bells. `topW`,
+  `exWeights` and the PR badges of past logs and edits (`rebuildPrHistory`) stay
+  raw; a session finished today is judged against history read in its own
+  meaning (`sheets.jsx` finish).
 - The best set for the estimate: completed, non-warm-up rows in reps mode,
   each done side of a per-side row on its own; none for assistance machines.
   (**source**: `onerm.js` `bestSetOf`)
@@ -295,6 +334,47 @@ differ from the app's.
   rebuild leaves every badge leap wrote unchanged.
 - Muscle balance: done, non-warm-up sets per muscle; primary muscles count 1,
   secondary 0.4.
+
+## Rotation and the session queue
+
+(**source**: `frontend/src/lib/queue.js`, `rotation.js`, `history.js`
+effectiveRoutineIds, `day-notes.js`; `api/queue.js`, `api/nudge.js`; v1.3.10 and
+v1.4.0. Ported to leap as `src/domain/queue.ts`, checked against openGym's own
+functions on about 47,000 randomised cases with no difference.)
+
+- `queue = { ids, since, startsOn, label, strict?, rotationId? }` is the live
+  round; `rotation = { id, sequence, label }` the saved loop;
+  `scheduleMode` holds the plan mode before a round exists. A usable queue
+  always means rotation mode. The round is the app's when
+  `queue.rotationId === rotation.id`; otherwise it is a planner's ("Externally
+  managed"), which the app never refills or edits.
+- A session is done when a workout on its routine started at or after `since`,
+  or (unless `strict`) is dated on or after `startsOn` and named after the
+  routine. A combined workout credits every routine in it.
+- The queue answers only for `max(today, startsOn)`: the session pinned there
+  (`dayPlan[date]` naming a round routine), else the first undone one not pinned
+  elsewhere. A date's plan: `"rest"` override → rest; an override outside the
+  round → that routine; otherwise the round's session first, the weekday's
+  routines outside the round alongside.
+- The app's finish of the workout that completes its own round starts the next
+  round the day after, rotated after the last session that workout credited,
+  and clears the old round's future pins. A phone that simply adopts the
+  server's copy does not do this, so leap does it in `write_log_workout`.
+- Deleting a routine leaves its id in the loop and the round; readers skip it.
+- `dayNotes[date] = { tag?, text?, _ts }` (tags `sick`, `travel`, `rest`,
+  `injured`, text ≤ 500, today or earlier): a noted day is skipped by the
+  missed-workout nudge and the workout-day reminder.
+
+## Body measurements
+
+(**source**: `frontend/src/lib/measurements.js`, `views/Measurements.jsx`)
+
+One entry per day `{ d, t, <19 built-in kinds>: cm | null, other: [{ id, name,
+value }] }`; lengths always in cm (a lb profile sees inches), `bodyFat` in %
+(≤ 100), values > 0 rounded to 0.1. `measurementEnabled` lists the built-in
+kinds the form shows (null: all but abdomen, wrists, ankles and body fat);
+`customMeasurements = [{ id, name (≤ 60), enabled }]`. Merged by day on `t`,
+removals recorded in `deleted.measurements`.
 
 ## Media
 

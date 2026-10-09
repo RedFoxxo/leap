@@ -17,6 +17,92 @@ async function setup(state: Record<string, unknown> = profile()) {
 }
 
 describe('write_log_workout', () => {
+  it('logs exercises of the 1.4.0 catalogue, an alias id as the exercise it draws', async () => {
+    const { h, doc } = await setup()
+    const r = await h.call('write_log_workout', { entries: [{ exerciseId: '12900', sets: [{ weight: 16, reps: 12 }] }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().workouts.at(-1).entries.map((e: { id: string }) => e.id)).toEqual(['12001'])
+    await h.close()
+  })
+
+  it('logs sets to failure, a Max set, incline and timed holds per side, and reads them back', async () => {
+    const state = profile()
+    ;(state.customEx as unknown[]).push({ id: 'ctread', n: 'Incline treadmill walk', bp: 'cardio', eq: 'leverage machine', primaries: ['cardiovascular system'], custom: true })
+    const { h, doc } = await setup(state)
+    const r = await h.call('write_log_workout', {
+      entries: [
+        { exerciseId: '0025', sets: [{ weight: 80, reps: 8, failure: true }, { weight: 60, reps: 12, max: true }] },
+        { exerciseId: 'ctread', sets: [{ min: 8, speed: 5.5, incline: 8 }] },
+        { exerciseId: 'cplank', sets: [{ sec: 45, side: 'L' }, { sec: 45, side: 'R' }] },
+      ],
+    })
+    expect(r.isError, r.text).toBe(false)
+    const logged = doc().workouts.at(-1)
+    expect(logged.entries[0].sets).toEqual([{ w: 80, r: 8, done: true, failure: true }, { w: 60, r: 12, done: true, max: true }])
+    expect(logged.entries[1].sets).toEqual([{ min: 8, speed: 5.5, done: true, incline: 8 }])
+    expect(logged.entries[2].sets).toEqual([{ sec: 45, w: 0, done: true, side: 'L' }, { sec: 45, w: 0, done: true, side: 'R' }])
+    const read = await h.call('read_workout', { id: logged.id })
+    expect(read.json.entries[0].sets[0]).toMatchObject({ failure: true })
+    expect(read.json.entries[1].sets[0]).toMatchObject({ incline: 8 })
+    const again = await h.call('write_update_workout', { id: logged.id, entries: read.json.entries })
+    expect(again.json).toMatchObject({ unchanged: true })
+    const bad = await h.call('write_log_workout', { entries: [{ exerciseId: '0025', sets: [{ weight: 40, reps: 10, warmup: true, failure: true }, { weight: 80, reps: 8, incline: 2 }] }] })
+    expect(bad.text).toMatch(/warm-up is never taken to failure.*incline is for cardio sets/)
+    await h.close()
+  })
+
+  it('keeps fields of a set it does not manage when the set comes back from read_workout', async () => {
+    const state = profile()
+    ;(state.workouts as any[])[0].entries[0].sets[1].at = 123
+    ;(state.workouts as any[])[0].entries[0].sets[1].weightOrigin = 'plan'
+    const { h, workout } = await setup(state)
+    const read = await h.call('read_workout', { id: 'w-legs' })
+    expect(read.json.entries[0].sets[1].other).toEqual({ at: 123, weightOrigin: 'plan' })
+    read.json.entries[0].sets[1].reps = 6
+    await h.call('write_update_workout', { id: 'w-legs', entries: read.json.entries })
+    expect(workout('w-legs').entries[0].sets[1]).toEqual({ w: 100, r: 6, done: true, rir: 2, at: 123, weightOrigin: 'plan' })
+    await h.close()
+  })
+
+  it('stamps the dumbbell meaning and counts both bells per dumbbell, as the app does', async () => {
+    const state = profile()
+    ;(state as any).dbLoad = { '0294': { mode: 'each', _ts: 1 } }
+    const { h, doc } = await setup(state)
+    await h.call('write_log_workout', { entries: [{ exerciseId: '0294', sets: [{ weight: 20, reps: 10 }] }, { exerciseId: '0025', sets: [{ weight: 50, reps: 10 }] }] })
+    const logged = doc().workouts.at(-1)
+    // As the app: the exercise's default plan with the meaning, so its progression reads the session right.
+    expect(logged.entries[0].target).toEqual({ id: '0294', sets: 3, reps: 10, weight: 0, mode: 'reps', dbLoad: 'each' })
+    expect(logged.entries[1].target).toBeNull()
+    expect(logged.vol).toBe(20 * 10 * 2 + 50 * 10)
+    await h.close()
+  })
+
+  it('judges today’s dumbbell record against history in the same meaning, as the app’s finish does', async () => {
+    const state = profile()
+    ;(state as any).dbLoad = { '0294': { mode: 'each', _ts: 1 } }
+    ;(state.workouts as any[]).push({ id: 'w-old', d: '2026-10-06', start: NOW - 86_400_000, entries: [{ id: '0294', target: { id: '0294', dbLoad: 'total' }, sets: [{ w: 38, r: 10, done: true }], topW: 38 }], prs: [], vol: 380 })
+    const { h, doc } = await setup(state)
+    const r = await h.call('write_log_workout', { entries: [{ exerciseId: '0294', sets: [{ weight: 20, reps: 10 }] }] })
+    expect(r.json.logged.prs).toEqual(['dumbbell biceps curl'])
+    expect(doc().workouts.at(-1).prs).toEqual(['0294'])
+    await h.close()
+  })
+
+  it('counts one bell for a dumbbell exercise logged per side or named one-arm', async () => {
+    const state = profile()
+    ;(state as any).dbLoad = { '0294': { mode: 'each', _ts: 1 }, '12001': { mode: 'each', _ts: 1 } }
+    ;(state.customEx as unknown[]).push({ id: 'crow1', n: 'Dumbbell one-arm row', bp: 'back', eq: 'dumbbell', primaries: ['upper-back'], custom: true })
+    ;(state as any).dbLoad.crow1 = { mode: 'each', _ts: 1 }
+    const { h, doc } = await setup(state)
+    await h.call('write_log_workout', { entries: [{ exerciseId: 'crow1', sets: [{ weight: 30, reps: 10 }] }] })
+    expect(doc().workouts.at(-1).vol).toBe(300)
+    // Push Day plans the curl per side: one bell.
+    await h.call('write_log_workout', { routineIds: [PUSH], entries: [{ exerciseId: '0294', sets: [{ left: { weight: 14, reps: 10 }, right: { weight: 14, reps: 10 } }] }] })
+    expect(doc().workouts.at(-1).entries[0].target).toMatchObject({ side: true, dbLoad: 'each' })
+    expect(doc().workouts.at(-1).vol).toBe(280)
+    await h.close()
+  })
+
   it('logs today with every set kind, as the app stores it', async () => {
     const { h, doc } = await setup()
     const r = await h.call('write_log_workout', {
@@ -314,8 +400,9 @@ describe('delete_workout', () => {
   it('deletes and drops a remembered weight that only it held', async () => {
     const { h, doc } = await setup()
     const r = await h.call('delete_workout', { id: 'w-push' })
-    expect(r.json).toMatchObject({ deleted: { id: 'w-push', date: '2026-10-05' }, note: expect.stringMatching(/no record of deletions/) })
+    expect(r.json).toMatchObject({ deleted: { id: 'w-push', date: '2026-10-05' }, note: expect.stringMatching(/records the deletion/) })
     expect(doc().workouts.map((w: { id: string }) => w.id)).toEqual(['w-legs'])
+    expect(doc().deleted.workouts).toHaveProperty('w-push')
     expect(doc().exWeights).toEqual({})
     expect((await h.call('delete_workout', { id: 'w-push' })).text).toMatch(/no workout with id/)
     await h.close()

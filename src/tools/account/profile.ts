@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { addDays, localDateTime, today, WEEKDAYS, weekdayOf } from '../../domain/dates.js'
 import { planFor, routineName } from '../../domain/plan.js'
+import { dayNoteOf, queueView, scheduleModeOf, type QueueView } from '../../domain/queue.js'
 import { listOf, unitOf, type State } from '../../state/types.js'
 import { failure, success } from '../respond.js'
 import { defineTool } from '../types.js'
@@ -25,12 +26,24 @@ const DATA_KEYS = new Set([
   'active',
   '_rev',
   '_ts',
+  '_wid',
+  '_wids',
+  'edited',
+  'deleted',
+  'undone',
+  'dayNotes',
+  'measurements',
+  'customMeasurements',
+  'queue',
+  'rotation',
+  'dbLoad',
+  'hints',
 ])
 
 export const readProfile = defineTool({
   name: 'read_profile',
   description:
-    'Overview of the signed-in profile: name, unit, how much is logged (workouts, routines, custom exercises, weigh-ins), first and last workout, workouts in the last 7 and 30 days (today included), what is planned today and the next training day, latest body weight and goal. Start here.',
+    'Overview of the signed-in profile: name, unit, how much is logged (workouts, routines, custom exercises, weigh-ins), first and last workout, workouts in the last 7 and 30 days (today included), what is planned today (and a missed-day note on it) and the next training day, or, when training follows a rotation, the round\'s progress and its next session, latest body weight and goal. Start here.',
   input: {},
   async handler(_args, ctx) {
     const [me, snapshot] = await Promise.all([
@@ -42,16 +55,20 @@ export const readProfile = defineTool({
     if (!me.data?.user || typeof me.data.user.id !== 'string') return failure('openGym answered without a profile; check OPENGYM_URL points at openGym')
     const { state, rev } = snapshot.data
     const workouts = listOf(state, 'workouts')
-    const day = today()
+    const day = today(ctx.now())
     const since = (days: number) => workouts.filter((w) => String(w.d) > addDays(day, -days) && String(w.d) <= day).length
     const named = (ids: string[]) => ids.map((id) => ({ id, name: routineName(state, id) }))
-    const todayPlan = planFor(state, day)
+    const todayPlan = planFor(state, day, day)
+    const rotation = queueView(state, day)
+    // Like Home: the next training day (one with a routine that has exercises), but not while the app's own rotation is in charge.
     let next: { date: string; weekday: string; routines: { id: string; name: string }[] } | undefined
-    for (let i = 1; i <= 7 && !next; i++) {
+    for (let i = 1; i <= 7 && !next && rotation?.managedBy !== 'app'; i++) {
       const date = addDays(day, i)
-      const plan = planFor(state, date)
-      if (plan.routineIds.length) next = { date, weekday: WEEKDAYS[weekdayOf(date)]!, routines: named(plan.routineIds) }
+      const plan = planFor(state, date, day)
+      const trainable = plan.routineIds.some((id) => listOf(listOf(state, 'routines').find((r) => r.id === id), 'ex').length > 0)
+      if (trainable) next = { date, weekday: WEEKDAYS[weekdayOf(date)]!, routines: named(plan.routineIds) }
     }
+    const note = dayNoteOf(state, day)
     const weighIns = listOf(state, 'bodyweight').filter((e) => typeof e.d === 'string')
     const latest = weighIns.sort((a, b) => String(a.d).localeCompare(String(b.d))).at(-1)
     return success({
@@ -72,9 +89,12 @@ export const readProfile = defineTool({
       today: {
         date: day,
         weekday: WEEKDAYS[weekdayOf(day)],
-        ...(todayPlan.routineIds.length ? { planned: named(todayPlan.routineIds) } : { rest: true }),
+        ...(todayPlan.routineIds.length ? { planned: named(todayPlan.routineIds), plannedBy: todayPlan.plannedBy } : { rest: true }),
         done: workouts.filter((w) => w.d === day).map((w) => ({ id: w.id, name: w.name })),
+        ...(note ? { note } : {}),
       },
+      schedule: scheduleModeOf(state),
+      ...(rotation ? { rotation: roundOf(rotation) } : {}),
       ...(next ? { nextTraining: next } : {}),
       ...(latest ? { bodyWeight: { date: latest.d, weight: latest.w } } : {}),
       ...(typeof state?.targetW === 'number' ? { goalWeight: state.targetW } : {}),
@@ -84,6 +104,20 @@ export const readProfile = defineTool({
   },
 })
 
+/** A round of the rotation (or a planner's week) in brief. */
+export function roundOf(v: QueueView) {
+  const next = v.sessions.find((s) => s.state === 'next')
+  return {
+    managedBy: v.managedBy,
+    ...(v.label ? { label: v.label } : {}),
+    done: v.done,
+    total: v.total,
+    ...(v.complete ? { complete: true } : {}),
+    ...(v.waiting ? { startsOn: v.startsOn } : {}),
+    ...(next ? { next: { id: next.id, name: next.name } } : {}),
+  }
+}
+
 function settingsOf(state: State | null): Record<string, unknown> {
   return Object.fromEntries(Object.entries(state ?? {}).filter(([k]) => !DATA_KEYS.has(k)))
 }
@@ -91,7 +125,7 @@ function settingsOf(state: State | null): Record<string, unknown> {
 export const readSettings = defineTool({
   name: 'read_settings',
   description:
-    'Every stored setting of the profile as openGym keeps it (unit, lang, theme, accent, restSec, restPauseSec, effort none/rir/rpe, weekStart 0=Sunday 1=Monday, startFrom plan/last, reminder {on,time,tz}, targetW, workoutView, wdec, speedUnit, sound, keepAwake, weighIn, autoBackup, ...). A setting that is absent uses the app default. Training data has its own tools.',
+    'Every stored setting of the profile as openGym keeps it (unit, lang, theme, accent, restSec, restPauseSec, effort none/rir/rpe, weekStart 0=Sunday 1=Monday, startFrom plan/last, reminder {on,time,tz,nudge,tone}, targetW, workoutView, oneRmFormula, scheduleMode, dumbbells, wdec, speedUnit, sound, restSound, keepAwake, weighIn, autoBackup, ...). A setting that is absent uses the app default. Training data, the rotation, day notes and measurements have their own tools.',
   input: {},
   async handler(_args, ctx) {
     const snapshot = await ctx.store.load()

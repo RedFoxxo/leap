@@ -151,12 +151,14 @@ describe('read_week_plan', () => {
       date: '2026-10-05',
       weekday: 'Monday',
       routines: [{ id: PUSH, name: 'Push Day' }],
+      plannedBy: 'weekday',
       workouts: [{ id: 'w-push', name: 'Push Day + Leg Day' }],
     })
-    expect(r.json.days[1]).toEqual({ date: '2026-10-06', weekday: 'Tuesday', rest: true })
-    expect(r.json.days[4]).toEqual({ date: '2026-10-09', weekday: 'Friday', rest: true, override: 'rest' })
-    expect(r.json.days[6]).toEqual({ date: '2026-10-11', weekday: 'Sunday', routines: [{ id: PULL, name: 'Pull Day' }], override: 'routine' })
-    expect(r.json.days[7]).toEqual({ date: '2026-10-12', weekday: 'Monday', routines: [{ id: PUSH, name: 'Push Day' }] })
+    expect(r.json.schedule).toBe('week')
+    expect(r.json.days[1]).toEqual({ date: '2026-10-06', weekday: 'Tuesday', rest: true, plannedBy: 'rest' })
+    expect(r.json.days[4]).toEqual({ date: '2026-10-09', weekday: 'Friday', rest: true, plannedBy: 'rest-override' })
+    expect(r.json.days[6]).toEqual({ date: '2026-10-11', weekday: 'Sunday', routines: [{ id: PULL, name: 'Pull Day' }], plannedBy: 'override' })
+    expect(r.json.days[7]).toEqual({ date: '2026-10-12', weekday: 'Monday', routines: [{ id: PUSH, name: 'Push Day' }], plannedBy: 'weekday' })
     await h.close()
   })
 })

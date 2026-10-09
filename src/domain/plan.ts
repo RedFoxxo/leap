@@ -1,5 +1,5 @@
 import { listOf, mapOf, type Entry, type State } from '../state/types.js'
-import { weekdayOf } from './dates.js'
+import { effectivePlan, type PlannedBy } from './queue.js'
 
 /** The routines on a weekday (`week[0..6]`): a list now, a single id in older documents. */
 export function weekdayRoutineIds(state: State | null, weekday: number): string[] {
@@ -10,21 +10,23 @@ export function weekdayRoutineIds(state: State | null, weekday: number): string[
 
 export interface DayPlan {
   routineIds: string[]
-  /** `rest` or `routine` when `dayPlan` overrides the weekly plan for this date. */
+  /** `rest` or `routine` when `dayPlan` overrides the plan for this date (a pin is not an override). */
   override?: 'rest' | 'routine'
+  /** What decided it: a date override, a pinned session, the rotation or a planner's queue, the weekday, or nothing (rest). */
+  plannedBy: PlannedBy
 }
 
 /**
- * What is planned on a date, as the app decides it: a `dayPlan` override (one
- * routine id, or `"rest"`) wins over the weekday's routines. Ids of routines
- * that no longer exist are ignored, as the app ignores them.
+ * What is planned on a date, as the app decides it (see queue.ts, effectivePlan):
+ * a `dayPlan` override wins; otherwise the rotation's or a planner's session for
+ * the day comes first, with the weekday's own routines alongside. `today`
+ * matters because the queue answers only for one day. Ids of routines that no
+ * longer exist are ignored, as the app ignores them.
  */
-export function planFor(state: State | null, iso: string): DayPlan {
-  const routines = new Set(listOf(state, 'routines').map((r) => r.id))
-  const override = mapOf(state, 'dayPlan')[iso]
-  if (override === 'rest') return { routineIds: [], override: 'rest' }
-  if (typeof override === 'string' && routines.has(override)) return { routineIds: [override], override: 'routine' }
-  return { routineIds: weekdayRoutineIds(state, weekdayOf(iso)).filter((id) => routines.has(id)) }
+export function planFor(state: State | null, iso: string, today: string): DayPlan {
+  const p = effectivePlan(state, iso, today)
+  const override = p.plannedBy === 'rest-override' ? 'rest' : p.plannedBy === 'override' ? 'routine' : undefined
+  return { routineIds: p.routineIds, plannedBy: p.plannedBy, ...(override ? { override } : {}) }
 }
 
 export function routineById(state: State | null, id: string): Entry | undefined {

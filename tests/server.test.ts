@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { VERSION } from '../src/version.js'
+import { OPENGYM, VERSION } from '../src/version.js'
 import { allTools } from '../src/tools/index.js'
 import { tierOf } from '../src/tools/types.js'
 import { harness } from './helpers/harness.js'
@@ -9,6 +9,15 @@ describe('server', () => {
   it('reports the package version', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
     expect(VERSION).toBe(pkg.version)
+  })
+
+  it('states the supported openGym the same way everywhere', () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
+    const range = `${OPENGYM.minimum} or later (tested with ${OPENGYM.tested})`
+    expect(read('../README.md')).toContain(`| ${range} |`)
+    expect(read('../CHANGELOG.md')).toContain(`Works with openGym ${range}`)
+    expect(read('../scripts/test-server.mjs')).toContain(`opengym-api:${OPENGYM.tested}'`)
+    expect(read('../data/exercises.json').slice(0, 300)).toContain(`"version":"${OPENGYM.tested}"`)
   })
 
   it('completes the MCP handshake and lists every tool', async () => {
@@ -48,10 +57,10 @@ describe('sync notes', () => {
     const h = await harness()
     const tools = new Map((await h.listTools()).map((t) => [t.name, t.description ?? '']))
     for (const name of ['write_settings', 'write_goal_weight', 'write_week_plan', 'write_day_plan', 'write_document']) {
-      expect(tools.get(name), name).toMatch(/from the copy changed last/)
+      expect(tools.get(name), name).toMatch(/one setting and one day at a time/)
     }
     for (const name of [...tools.keys()].filter((n) => n.startsWith('delete_') && !['delete_media_sweep', 'delete_all_sessions', 'delete_coach_data', 'delete_media'].includes(n))) {
-      expect(tools.get(name), name).toMatch(/no record of deletions/)
+      expect(tools.get(name), name).toMatch(/records the deletion/)
     }
     await h.close()
   })
