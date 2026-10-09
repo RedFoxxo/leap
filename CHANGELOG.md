@@ -4,7 +4,7 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal) and is reported to
 MCP clients in the server handshake.
 
-## 1.1.0 — Unreleased
+## 1.1.0 — 2026-10-09
 
 Works with openGym 1.4.0 or later (tested with 1.4.0). **Needs openGym 1.4.0**:
 leap refuses to write to an older server; use leap 1.0.0 with openGym 1.3.9.

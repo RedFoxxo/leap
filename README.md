@@ -14,7 +14,7 @@ not report its version, so leap tells it from what the server answers
 
 | leap | openGym |
 |---|---|
-| 1.1.0 (next) | 1.4.0 or later (tested with 1.4.0) |
+| 1.1.0 | 1.4.0 or later (tested with 1.4.0) |
 | 1.0.0 | 1.3.9 |
 
 Raising the oldest supported openGym is called out in the changelog.

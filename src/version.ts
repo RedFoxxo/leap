@@ -1,4 +1,4 @@
-export const VERSION = '1.0.0'
+export const VERSION = '1.1.0'
 
 /**
  * The openGym versions this release works with. leap refuses to write to an
