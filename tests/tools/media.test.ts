@@ -172,15 +172,45 @@ describe('write_download_media and read_media_usage', () => {
 
 describe('copying a fixture keeps paths honest', () => {
   it('reads through a ~/ path', async () => {
-    const { h } = await setup()
-    const home = process.env.HOME!
-    const name = `.leap-test-${process.pid}.png`
-    copyFileSync(fixture('text.png'), join(home, name))
+    const { h, dir } = await setup()
+    const home = process.env.HOME
+    // A throwaway home: the test never writes into the real one.
+    process.env.HOME = dir
+    copyFileSync(fixture('text.png'), join(dir, 'squat.png'))
     try {
-      expect((await h.call('write_attach_media', { path: `~/${name}`, workoutId: 'w-legs' })).isError).toBe(false)
+      const r = await h.call('write_attach_media', { path: '~/squat.png', workoutId: 'w-legs' })
+      expect(r.isError, r.text).toBe(false)
     } finally {
-      ;(await import('node:fs')).rmSync(join(home, name))
+      if (home === undefined) delete process.env.HOME
+      else process.env.HOME = home
     }
+    await h.close()
+  })
+})
+
+describe('delete_media_sweep', () => {
+  it('runs the sweep and reports what openGym freed', async () => {
+    const { h, fake } = await setup()
+    // api/server.js POST /api/media/sweep, v1.4.0: { removed, freedBytes, usage }.
+    fake.stub.post('/api/media/sweep', { removed: 2, freedBytes: 3 * 1048576 + 52429, usage: { bytes: 12 * 1048576, count: 5, quotaBytes: 0 } })
+    const r = await h.call('delete_media_sweep')
+    expect(r.json).toEqual({ removed: 2, freedMB: 3.1, usage: { usedMB: 12, files: 5, quotaMB: 'no limit' } })
+    expect(fake.stub.find('POST', '/api/media/sweep').map((c) => c.body)).toEqual([{}])
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('reports the hourly limit', async () => {
+    const { h, fake } = await setup()
+    fake.stub.on({ method: 'POST', path: '/api/media/sweep', status: 429, body: { error: 'too many requests', retryAfter: 600 }, headers: { 'retry-after': '600' } })
+    expect((await h.call('delete_media_sweep')).text).toMatch(/The sweep did not run[\s\S]*429/)
+    await h.close()
+  })
+
+  it('warns that a file another device has not synced its reference to yet goes too', async () => {
+    const { h } = await setup()
+    const tool = (await h.listTools()).find((t) => t.name === 'delete_media_sweep')!
+    expect(tool.description).toMatch(/not synced yet/)
     await h.close()
   })
 })

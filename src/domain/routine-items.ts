@@ -71,6 +71,9 @@ export function alignedOrNone(values: readonly number[] | undefined, length: num
   return out.some((v) => v > 0) ? out : undefined
 }
 
+/** Equipment the app treats as body weight unless an exercise says otherwise (openGym `exercises.js` isBodyweightEq). */
+export const BODYWEIGHT_EQUIPMENT: ReadonlySet<string> = new Set(['body weight', 'band', 'resistance band'])
+
 /** What the app gives a freshly added exercise (its defaultConfig). */
 export function defaultItem(id: string, mode: ItemMode, bodyweight: boolean): Entry {
   if (mode === 'cardio') return { id, sets: 1, min: 20, speed: 8 }

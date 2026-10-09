@@ -10,9 +10,15 @@ import { volumeFactor } from './dumbbells.js'
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 const n0 = (v: unknown): number => num(v) ?? (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : 0)
 
-/** `phase: "warmup"` wins; older rows carry `warmup: true`. */
+/**
+ * A set `phase` ("warmup", "warm-up" or "warm_up") wins; older rows carry `warmup: true`
+ * (openGym `workout-model.js` phaseForSet, v1.4.0, 28b7e4dc).
+ */
 export function isWarmup(set: Entry): boolean {
-  if (typeof set.phase === 'string' && set.phase.trim() !== '') return set.phase.trim().toLowerCase() === 'warmup'
+  if (set.phase != null && set.phase !== '') {
+    const token = typeof set.phase === 'string' ? set.phase.trim().toLowerCase() : ''
+    return token === 'warmup' || token === 'warm-up' || token === 'warm_up'
+  }
   return set.warmup === true
 }
 
@@ -62,12 +68,40 @@ export function doneUnits(set: Entry): number {
 
 export type SetMode = 'reps' | 'time' | 'cardio'
 
-export function setMode(set: Entry): SetMode {
-  if (set.mode === 'reps' || set.mode === 'time' || set.mode === 'cardio') return set.mode
-  if (set.min != null || set.speed != null) return 'cardio'
-  if (set.sec != null) return 'time'
-  return 'reps'
+const MODES: readonly string[] = ['reps', 'time', 'cardio']
+const token = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '')
+
+function modeFromUnit(v: unknown): SetMode | null {
+  const t = token(v)
+  if (['rep', 'reps', 'repetition', 'repetitions'].includes(t)) return 'reps'
+  if (['sec', 'secs', 'second', 'seconds'].includes(t)) return 'time'
+  if (['min', 'mins', 'minute', 'minutes'].includes(t)) return 'cardio'
+  return null
 }
+
+const explicitMode = (s: Entry): SetMode | null => (MODES.includes(token(s.mode)) ? (token(s.mode) as SetMode) : modeFromUnit(s.unit))
+
+function inferredMode(s: Entry): SetMode | null {
+  const explicit = explicitMode(s)
+  if (explicit) return explicit
+  if (token(s.mode) === 'amrap') return 'reps'
+  if (s.min != null || s.speed != null) return 'cardio'
+  if (s.sec != null || s.seconds != null || s.durationSec != null) return 'time'
+  if (s.r != null || s.reps != null || s.actualReps != null) return 'reps'
+  return null
+}
+
+/**
+ * A row's mode as openGym resolves it: the row's own mode (or unit), then the entry's target
+ * (the routine exercise it was planned by), then the row's fields
+ * (`workout-model.js` modeForSet, v1.4.0, 28b7e4dc).
+ */
+export function setMode(set: Entry, target: Entry = {}): SetMode {
+  return explicitMode(set) ?? inferredMode(target) ?? inferredMode(set) ?? 'reps'
+}
+
+/** What an entry's rows are read against: its target, else the entry itself, as the app does. */
+export const targetOf = (entry: Entry): Entry => (isRecord(entry.target) ? entry.target : entry)
 
 export function entriesOf(workout: Entry): Entry[] {
   return list(workout.entries)
@@ -92,32 +126,36 @@ export function workoutVolume(workout: Entry, nameOf: (id: string) => string = (
   return entriesOf(workout).reduce((v, e) => v + entryVolume(e, nameOf(String(e.id))), 0)
 }
 
-/** Completed weights of an entry's work rows (each done side on its own). */
-export function completedWorkWeights(entry: Entry): number[] {
-  const out: number[] = []
-  for (const s of setsOf(entry)) {
-    if (isWarmup(s) || !hasCompletedWork(s)) continue
-    const sides = sidesOf(s)
-    for (const row of sides ? [sides.L, sides.R].filter((x) => x.done === true) : [s]) {
-      const w = num(row.w) ?? (typeof row.w === 'string' ? Number(row.w) : NaN)
-      if (Number.isFinite(w)) out.push(w)
-    }
-  }
-  return out
-}
-
 /**
  * The best completed working weight of an entry: the heaviest, or for an
  * assistance machine the least assistance (a 0 there is "not entered", not a set
- * without help). 0 when nothing qualifies, as for body-weight-only work.
+ * without help). Reps rows decide when there are any (a timed row's added load
+ * counts only without them); each done side on its own. When no row gives a
+ * usable weight, an old record's stored `topW` stands in, unless the entry has
+ * warm-ups or rows that are not reps. 0 when nothing qualifies, as for
+ * body-weight-only work. Ported from openGym `history.js` bestWeightForEntry
+ * (v1.4.0, 28b7e4dc).
  */
 export function bestWeight(entry: Entry, assisted = false): number {
-  const weights = completedWorkWeights(entry)
-  if (assisted) {
-    const positive = weights.filter((w) => w > 0)
-    return positive.length ? Math.min(...positive) : 0
+  const target = targetOf(entry)
+  const work = setsOf(entry).filter((s) => !isWarmup(s))
+  const done = work.filter(hasCompletedWork)
+  const reps = done.filter((s) => setMode(s, target) === 'reps')
+  let best = 0
+  let usable = false
+  for (const s of reps.length ? reps : done) {
+    const sides = sidesOf(s)
+    for (const row of sides ? [sides.L, sides.R].filter((x) => x.done === true) : [s]) {
+      const w = Number(row.w)
+      if (!Number.isFinite(w) || (assisted && !(w > 0))) continue
+      best = !usable ? w : assisted ? Math.min(best, w) : Math.max(best, w)
+      usable = true
+    }
   }
-  return weights.length ? Math.max(0, ...weights) : 0
+  if (usable) return best
+  const topW = Number(entry.topW)
+  const onlyReps = setMode({}, target) === 'reps' && !work.some((s) => setMode(s, target) !== 'reps')
+  return onlyReps && !setsOf(entry).some(isWarmup) && Number.isFinite(topW) ? topW : 0
 }
 
 /** The routine a workout entry was planned by: its own `rid` on combined days, else the workout's. */
@@ -133,26 +171,3 @@ export function routineIdsOf(workout: Entry): string[] {
   return ids.filter((x): x is string => typeof x === 'string' && x !== '')
 }
 
-const pick = (from: Entry, keys: readonly string[]): Entry => {
-  const out: Entry = {}
-  for (const k of keys) if (from[k] !== undefined && from[k] !== null) out[k] = from[k]
-  return out
-}
-
-const SIDE_KEYS = ['w', 'r', 'done', 'rir', 'rpe', 'type', 'drops', 'clusters'] as const
-const ROW_KEYS = ['w', 'r', 'done', 'rir', 'rpe', 'sec', 'min', 'speed', 'incline', 'side', 'drops', 'clusters', 'failure', 'max'] as const
-
-/** A set row for tool output: what was logged, with its kind spelled out. */
-export function describeSet(set: Entry, index: number): Entry {
-  const out: Entry = { n: index + 1 }
-  if (isWarmup(set)) out.kind = 'warmup'
-  const type = setType(set)
-  if (type !== 'straight') out.type = type
-  const mode = setMode(set)
-  if (mode !== 'reps') out.mode = mode
-  Object.assign(out, pick(set, ROW_KEYS))
-  if (out.done === undefined) out.done = false
-  const sides = sidesOf(set)
-  if (sides) out.sides = { L: pick(sides.L, SIDE_KEYS), R: pick(sides.R, SIDE_KEYS) }
-  return out
-}

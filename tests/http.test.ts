@@ -20,6 +20,34 @@ describe('HttpCore', () => {
     expect(lines.join('\n')).not.toContain(TOKEN)
   })
 
+  it('never follows a redirect, so the token cannot travel to another host', async () => {
+    const stub = new FetchStub().get('/api/me', '', { status: 302, headers: { location: 'https://evil.example/steal' } })
+    const r = await http(stub).request({ method: 'GET', path: '/api/me' })
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.message).toMatch(/redirected to https:\/\/evil\.example\/steal; check OPENGYM_URL/)
+    expect(stub.calls).toHaveLength(1)
+  })
+
+  it('keeps the configured token out of error bodies, network errors and token fields of a failed answer', async () => {
+    const body = { error: `bad token ${TOKEN}`, token: 'other.secret' }
+    const stub = new FetchStub()
+      .on({ method: 'POST', path: '/api/pair/redeem', status: 400, body })
+      .on({ method: 'GET', path: '/api/me', networkError: `connect failed for ${TOKEN}` })
+    const failed = await http(stub).request({ method: 'POST', path: '/api/pair/redeem', json: {}, keepTokens: true })
+    expect(JSON.stringify(failed)).not.toContain(TOKEN)
+    expect(JSON.stringify(failed)).not.toContain('other.secret')
+    const offline = await http(stub).request({ method: 'GET', path: '/api/me' })
+    expect(JSON.stringify(offline)).not.toContain(TOKEN)
+  })
+
+  it('names a proxy’s error page as such, and a success page as a wrong URL', async () => {
+    const stub = new FetchStub().get('/api/a', '<html>Bad Gateway</html>', { status: 502 }).get('/api/b', '<!doctype html><p>app</p>')
+    const a = await http(stub).request({ method: 'GET', path: '/api/a' })
+    expect(!a.ok && a.message).toMatch(/error page from a proxy/)
+    const b = await http(stub).request({ method: 'GET', path: '/api/b' })
+    expect(!b.ok && b.message).toMatch(/is OPENGYM_URL the openGym instance/)
+  })
+
   it('sends no Authorization header without a token', async () => {
     const stub = new FetchStub().get('/api/health', { ok: true })
     await http(stub, '').request({ method: 'GET', path: '/api/health' })

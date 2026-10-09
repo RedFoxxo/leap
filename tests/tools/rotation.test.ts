@@ -32,12 +32,12 @@ describe('write_rotation', () => {
 
     const plan = await h.call('read_week_plan', { days: 2 })
     // The profile's override of 2026-10-11 names Pull Day, a session of the round: it now pins it there.
-    expect(plan.json).toMatchObject({ schedule: 'rotation', rotation: { managedBy: 'app', sessions: [{ state: 'next' }, { state: 'later' }, { state: 'pinned', pinnedTo: '2026-10-11' }] } })
+    expect(plan.json).toMatchObject({ schedule: 'rotation', round: { managedBy: 'app', sessions: [{ state: 'next' }, { state: 'later' }, { state: 'pinned', pinnedTo: '2026-10-11' }] } })
     // Wednesday plans Leg Day by weekday, but it is in the loop: the loop's session is the day's.
     expect(plan.json.days[0]).toMatchObject({ routines: [{ id: PUSH }], plannedBy: 'rotation' })
     expect(plan.json.days[1]).toMatchObject({ rest: true, plannedBy: 'rest' })
     const profileR = await h.call('read_profile')
-    expect(profileR.json).toMatchObject({ schedule: 'rotation', rotation: { managedBy: 'app', done: 0, total: 3, next: { id: PUSH } } })
+    expect(profileR.json).toMatchObject({ schedule: 'rotation', round: { managedBy: 'app', done: 0, total: 3, sessions: [{ id: PUSH, state: 'next' }, {}, {}] } })
     expect(profileR.json).not.toHaveProperty('nextTraining')
     await h.close()
   })
@@ -59,14 +59,14 @@ describe('the round and logged workouts', () => {
     now += HOUR
     vi.setSystemTime(now)
     const first = await log(h, PUSH, '0025')
-    expect(first.json.rotation).toEqual({ sessionsDone: ['Push Day'] })
+    expect(first.json.round).toEqual({ sessionsDone: ['Push Day'] })
     now += 24 * HOUR
     vi.setSystemTime(now)
     await log(h, LEGS, '0043')
     now += 24 * HOUR
     vi.setSystemTime(now)
     const last = await log(h, PULL, '0032')
-    expect(last.json.rotation).toEqual({ sessionsDone: ['Pull Day'], roundComplete: true, nextRound: { startsOn: '2026-10-10', sessions: ['Push Day', 'Leg Day', 'Pull Day'] } })
+    expect(last.json.round).toEqual({ sessionsDone: ['Pull Day'], roundComplete: true, nextRound: { startsOn: '2026-10-10', sessions: ['Push Day', 'Leg Day', 'Pull Day'] } })
     expect(doc().queue).toMatchObject({ startsOn: '2026-10-10', rotationId: doc().rotation.id })
     expect(doc().queue.since).toBeGreaterThan(doc().workouts.at(-1).start)
     await h.close()
@@ -79,7 +79,9 @@ describe('the round and logged workouts', () => {
     expect(r.json).toMatchObject({ kind: 'pin' })
     const plan = await h.call('read_week_plan', { days: 2 })
     expect(plan.json.days[1]).toMatchObject({ routines: [{ id: LEGS }], plannedBy: 'pin' })
-    expect(plan.json.rotation.sessions[1]).toMatchObject({ state: 'pinned', pinnedTo: '2026-10-08' })
+    expect(plan.json.round.sessions[1]).toMatchObject({ state: 'pinned', pinnedTo: '2026-10-08' })
+    await log(h, PUSH, '0025')
+    expect((await h.call('write_day_plan', { date: '2026-10-09', plan: PUSH })).json.warning).toMatch(/already done/)
     await h.close()
   })
 })
@@ -95,6 +97,24 @@ describe('write_schedule_mode and write_rotation_round', () => {
     expect((await h.call('read_week_plan', { days: 1 })).json.days[0]).toMatchObject({ routines: [{ id: LEGS }], plannedBy: 'weekday' })
     const back = await h.call('write_schedule_mode', { mode: 'rotation' })
     expect(back.json).toMatchObject({ schedule: 'rotation', roundStarted: true, round: { total: 2 } })
+    await h.close()
+  })
+
+  it('leaves a running round alone when rotation mode is chosen again', async () => {
+    let now = NOW
+    const { h, doc } = await setup(profile(), () => now)
+    await h.call('write_rotation', { routineIds: [PUSH, LEGS] })
+    const before = structuredClone(doc().queue)
+    now += 2 * 24 * 3_600_000
+    vi.setSystemTime(now)
+    const r = await h.call('write_schedule_mode', { mode: 'rotation' })
+    expect(r.json).not.toHaveProperty('roundStarted')
+    expect(doc().queue).toEqual(before)
+    // A planner's queue is not the app's to replace either.
+    await h.call('write_session_queue', { routineIds: [LEGS], label: 'W1' })
+    const planner = structuredClone(doc().queue)
+    await h.call('write_schedule_mode', { mode: 'rotation' })
+    expect(doc().queue).toEqual(planner)
     await h.close()
   })
 

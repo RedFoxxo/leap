@@ -1,5 +1,5 @@
 import type { ExerciseIndex } from '../../catalog/exercises.js'
-import { localDateTime } from '../../domain/dates.js'
+import { localDateTime, zoneOf } from '../../domain/dates.js'
 import { routineName } from '../../domain/plan.js'
 import {
   bestWeight,
@@ -16,6 +16,7 @@ import {
 import { entryDbLoad } from '../../domain/dumbbells.js'
 import { isRecord, type Entry, type State } from '../../state/types.js'
 import { MANAGED_ENTRY_KEYS, setForTools } from '../../domain/workout-items.js'
+import { workoutKey } from '../../domain/workouts.js'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
@@ -25,8 +26,6 @@ export function entryName(exercises: ExerciseIndex, entry: Entry): string {
   const id = String(entry.id)
   return exercises.get(id)?.name ?? str(entry.n) ?? id
 }
-
-export const isAssisted = (exercises: ExerciseIndex, id: string) => exercises.assisted(id)
 
 /** Rounds away float noise (33.75 × 12 sums) without hiding real decimals. */
 export const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** digits
@@ -61,12 +60,12 @@ export function workoutSummary(workout: Entry, state: State | null, exercises: E
   const stored = finite(workout.vol)
   const prs = Array.isArray(workout.prs) ? workout.prs.filter((x): x is string => typeof x === 'string') : []
   const out: Entry = {
-    id: workout.id,
+    id: workoutKey(workout),
     date: workout.d,
     name: str(workout.name) ?? (routines.length ? routines.map((r) => routineName(state, r)).join(' + ') : 'Workout'),
   }
   if (routines.length) out.routines = routines.map((id) => ({ id, name: routineName(state, id) }))
-  const start = localDateTime(workout.start)
+  const start = localDateTime(workout.start, zoneOf(state))
   if (start) out.start = start
   const minutes = durationMin(workout)
   if (minutes !== undefined) out.durationMin = minutes
@@ -86,13 +85,13 @@ export function workoutSummary(workout: Entry, state: State | null, exercises: E
 export function workoutDetail(workout: Entry, state: State | null, exercises: ExerciseIndex): Entry {
   const summary = workoutSummary(workout, state, exercises)
   delete summary.exercises
-  const end = localDateTime(workout.end)
+  const end = localDateTime(workout.end, zoneOf(state))
   if (end) summary.end = end
   if (workout.excludeFromProgression === true) summary.excludeFromProgression = true
   summary.entries = entriesOf(workout).map((e, i) => {
     const id = String(e.id)
     const sets = setsOf(e)
-    // The format write_update_workout takes back as it is; position, name, routineName, volume and bestWeight are for reading.
+    // The format write_update_workout takes back as it is; position, name, routineName, volume, weightMeans and bestWeight are for reading.
     const out: Entry = { position: i + 1, name: entryName(exercises, e), exerciseId: id, sets: sets.map(setForTools) }
     const note = str(e.note)
     if (note) out.note = note
@@ -102,8 +101,8 @@ export function workoutDetail(workout: Entry, state: State | null, exercises: Ex
     if (rid && routineIdsOf(workout).length > 1) out.routineName = routineName(state, rid)
     out.volume = round(entryVolume(e, entryName(exercises, e)))
     const meaning = entryDbLoad(e)
-    if (meaning !== 'as') out.weightMeans = meaning === 'each' ? 'per dumbbell' : 'both dumbbells together'
-    const best = bestWeight(e, isAssisted(exercises, id))
+    if (meaning !== 'as') out.weightMeans = meaning
+    const best = bestWeight(e, exercises.assisted(id))
     if (best > 0) out.bestWeight = best
     const other = Object.fromEntries(Object.entries(e).filter(([k]) => !MANAGED_ENTRY_KEYS.has(k) && e[k] !== null))
     if (Object.keys(other).length) out.other = other

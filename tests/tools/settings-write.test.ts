@@ -128,6 +128,38 @@ describe('settings the app would not take', () => {
     await h.close()
   })
 
+  it('keeps a time zone cleared on purpose, and reports the reminder as saved', async () => {
+    const { h, doc } = await setup({ ...profile(), reminder: { on: false, time: '08:00', tz: 'Europe/Warsaw' } })
+    const r = await h.call('write_settings', { reminder: { on: true, tz: null } })
+    expect(r.json).toMatchObject({ saved: true })
+    expect(r.json).not.toHaveProperty('notPersisted')
+    expect(doc().reminder).toEqual({ on: true, time: '08:00', tz: null })
+    await h.close()
+  })
+
+  it('offers the rest times the app’s wheels do', async () => {
+    const { h, fake } = await setup()
+    for (const args of [{ restSec: 901 }, { restSec: -1 }, { restPauseSec: 4 }, { restPauseSec: 301 }, { restPauseSec: 0 }]) {
+      expect((await h.call('write_settings', args)).isError, JSON.stringify(args)).toBe(true)
+    }
+    expect(fake.stub.calls).toHaveLength(0)
+    expect((await h.call('write_settings', { restSec: 0, restPauseSec: 5 })).isError).toBe(false)
+    expect((await h.call('write_settings', { restSec: 900, restPauseSec: 300 })).isError).toBe(false)
+    await h.close()
+  })
+
+  it('brings the "on this phone only" line back with the connection status, as the app does', async () => {
+    const { h, doc } = await setup({ ...profile(), connStatus: false, connLocal: false })
+    const r = await h.call('write_settings', { connStatus: true })
+    expect(r.json).toMatchObject({ saved: true, changed: { connStatus: { from: false, to: true }, connLocal: { from: false, to: true } } })
+    expect(doc()).toMatchObject({ connStatus: true, connLocal: true })
+    await h.call('write_settings', { connStatus: false })
+    expect(doc()).toMatchObject({ connStatus: false, connLocal: true })
+    await h.call('write_settings', { connStatus: true, connLocal: false })
+    expect(doc()).toMatchObject({ connStatus: true, connLocal: false })
+    await h.close()
+  })
+
   it('accepts only the values the app offers', async () => {
     const { h, fake } = await setup()
     for (const args of [{ theme: 'neon' }, { accent: 'purple' }, { lang: 'xx' }, { heatmapMetric: 'reps' }]) {
@@ -141,7 +173,8 @@ describe('settings the app would not take', () => {
   it('refuses a weigh-in in the future', async () => {
     const { h, fake } = await setup()
     expect((await h.call('write_bodyweight', { weight: 80, date: '2999-01-01' })).text).toMatch(/in the future/)
-    expect(fake.stub.calls).toHaveLength(0)
+    // What "today" is depends on the profile's time zone, so the profile may be read; nothing is written.
+    expect(fake.puts).toHaveLength(0)
     await h.close()
   })
 })
@@ -153,6 +186,12 @@ describe('write_exercise_note and write_favourite', () => {
     expect(doc().exNotes).toEqual({ '0025': 'grip at the rings', '0043': 'bar on traps' })
     expect((await h.call('write_exercise_note', { exerciseId: '0025', note: '' })).json).toMatchObject({ note: null, previous: 'grip at the rings' })
     expect(doc().exNotes).toEqual({ '0043': 'bar on traps' })
+    await h.close()
+  })
+
+  it('says how a note syncs, like every setting', async () => {
+    const h = await harness()
+    expect((await h.listTools()).find((t) => t.name === 'write_exercise_note')!.description).toMatch(/one setting and one day at a time/)
     await h.close()
   })
 
@@ -218,6 +257,18 @@ describe('write_document', () => {
     const { h, fake } = await setup()
     for (const key of ['workouts', 'unit', 'coach', 'resetAt', 'week', 'targetW', 'reminder', 'exNotes', 'favEx']) {
       expect((await h.call('write_document', { key, value: 1 })).text, key).toMatch(/cannot be set raw/)
+    }
+    expect(fake.stub.calls).toHaveLength(0)
+    await h.close()
+  })
+
+  it('refuses every setting write_settings validates, and the values it keeps in step', async () => {
+    const { h, fake } = await setup()
+    const tools = await h.listTools()
+    const settings = Object.keys((tools.find((t) => t.name === 'write_settings') as unknown as { inputSchema: { properties: object } }).inputSchema.properties)
+    expect(settings).toEqual(expect.arrayContaining(['restSec', 'accent', 'theme', 'lang', 'connStatus', 'speedUnit']))
+    for (const key of [...settings, 'accentCustom', 'classicChime', 'langAuto']) {
+      expect((await h.call('write_document', { key, value: 'x' })).text, key).toMatch(/cannot be set raw/)
     }
     expect(fake.stub.calls).toHaveLength(0)
     await h.close()

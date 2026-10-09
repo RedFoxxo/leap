@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { today } from '../../domain/dates.js'
+import { today, zoneOf } from '../../domain/dates.js'
 import { routineName } from '../../domain/plan.js'
 import {
   chooseFixedWeek,
@@ -18,7 +18,8 @@ import {
   startNewPass,
   startPass,
   stopPass,
-  type QueueView,
+  loopLabel,
+  roundOut,
 } from '../../domain/queue.js'
 import { newId } from '../../state/ids.js'
 import { apply, refuse } from '../../state/store.js'
@@ -38,18 +39,7 @@ import { change, LAST_CHANGE_NOTE } from '../write.js'
 
 const ROUTINES = z.array(entryId).min(1).max(30)
 
-const round = (v: QueueView | null) =>
-  v
-    ? {
-        managedBy: v.managedBy,
-        ...(v.label ? { label: v.label } : {}),
-        done: v.done,
-        total: v.total,
-        ...(v.complete ? { complete: true } : {}),
-        startsOn: v.startsOn,
-        sessions: v.sessions.map((s) => ({ name: s.name, state: s.state, ...(s.pinnedTo ? { pinnedTo: s.pinnedTo } : {}) })),
-      }
-    : null
+const round = roundOut
 
 const checkRoutines = (draft: State, ids: string[]) => {
   const dupes = ids.filter((id, i) => ids.indexOf(id) !== i)
@@ -76,13 +66,15 @@ export const writeRotation = defineTool({
       (draft, { now }) => {
         const problem = checkRoutines(draft, args.routineIds)
         if (problem) return refuse(problem)
-        const day = today(ctx.now())
+        const day = today(ctx.now(), zoneOf(draft))
         const q = queueOf(draft)
         const planner = !!q && !managedByApp(draft, q)
         if (planner && !args.adopt) {
           return refuse(`a planner's queue${q.label ? ` ("${q.label}")` : ''} is running; adopt: true makes it the user's own rotation (the planner no longer controls it, and a later week it writes replaces the rotation)`)
         }
-        const { swept, refilled } = saveRotation(draft, args.routineIds, () => newId('', now), day, ctx.now())
+        // Adopting gives the loop no name of its own: the planner's week name belongs to that one round (Plan.jsx adopt).
+        const label = planner ? '' : loopLabel(draft)
+        const { swept, refilled } = saveRotation(draft, args.routineIds, label, () => newId('', now), day, ctx.now())
         draft.scheduleMode = 'rotation'
         return apply({ view: queueView(draft, day), swept, refilled, adopted: planner, names: namedRoutines(draft, args.routineIds) })
       },
@@ -102,32 +94,34 @@ export const writeRotation = defineTool({
 export const writeScheduleMode = defineTool({
   name: 'write_schedule_mode',
   description:
-    `How training is planned, as the app's "How you train" switch: "rotation" holds rotation mode and starts a round from the saved rotation when there is one (set the rotation with write_rotation); "week" goes back to fixed weekdays, which were never touched: the app's own round stops (its future date pins go) and the rotation stays saved for later. A planner's queue is not stopped by "week"; clear it with write_session_queue. ${LAST_CHANGE_NOTE}`,
+    `How training is planned, as the app's "How you train" switch: "rotation" holds rotation mode and starts a round from the saved rotation when there is one (set the rotation with write_rotation); "week" goes back to fixed weekdays, which were never touched: the app's own round stops (its future date pins go) and the rotation stays saved for later. Choosing the mode the plan is already in changes nothing, so a running round keeps its progress. A planner's queue is not stopped by "week"; clear it with write_session_queue. ${LAST_CHANGE_NOTE}`,
   input: { mode: z.enum(['week', 'rotation']) },
   async handler(args, ctx) {
     return change(
       ctx,
       'save the schedule mode',
       (draft) => {
-        const day = today(ctx.now())
+        const day = today(ctx.now(), zoneOf(draft))
+        // As the app's switch: choosing the mode it is already in does nothing (Plan.jsx setMode).
+        if (scheduleModeOf(draft) === args.mode) return apply({ started: false, stopped: false, plannerKept: false, view: queueView(draft, day), unusable: queueUnusable(draft), mode: args.mode })
         if (args.mode === 'rotation') {
           const started = chooseRotation(draft, day, ctx.now())
-          return apply({ started, stopped: false, plannerKept: false, view: queueView(draft, day), unusable: queueUnusable(draft) })
+          return apply({ started, stopped: false, plannerKept: false, view: queueView(draft, day), unusable: queueUnusable(draft), mode: scheduleModeOf(draft) })
         }
         const before = queueOf(draft)
         const { stopped } = chooseFixedWeek(draft, day)
-        return apply({ started: false, stopped, plannerKept: !!before && !stopped, view: queueView(draft, day), unusable: false })
+        return apply({ started: false, stopped, plannerKept: !!before && !stopped, view: queueView(draft, day), unusable: false, mode: scheduleModeOf(draft) })
       },
       (r) => ({
-        schedule: args.mode,
+        schedule: r.mode,
         ...(r.started ? { roundStarted: true } : {}),
         ...(r.stopped ? { roundStopped: true } : {}),
         ...(r.view ? { round: round(r.view) } : {}),
-        ...(args.mode === 'rotation' && !r.view && !r.unusable ? { note: 'No round yet: set the rotation with write_rotation' } : {}),
+        ...(r.mode === 'rotation' && !r.view && !r.unusable ? { note: 'No round is running: set the rotation with write_rotation, or start it with write_rotation_round' } : {}),
         ...(r.unusable ? { note: 'A stored round has no routines left; clear it with write_session_queue (null) before starting a new one' } : {}),
-        ...(r.plannerKept ? { note: "A planner's queue is still running, so the app keeps showing it; clear it with write_session_queue (null)" } : {}),
+        ...(r.plannerKept ? { note: "A planner's queue is still running, so the plan stays in rotation mode; clear it with write_session_queue (null)" } : {}),
       }),
-      { verify: (s) => (s.scheduleMode === args.mode ? [] : ['scheduleMode']) },
+      { verify: (s, r) => (scheduleModeOf(s) === r.mode ? [] : ['scheduleMode']) },
     )
   },
 })
@@ -135,14 +129,14 @@ export const writeScheduleMode = defineTool({
 export const writeRotationRound = defineTool({
   name: 'write_rotation_round',
   description:
-    'Control the round of the app\'s own rotation: "start" begins a round from the saved rotation when none is running; "restart" starts the loop over from its first routine today, and nothing logged before now counts for it; "stop" ends the round and keeps the rotation saved (rotation mode stays selected; write_schedule_mode "week" goes back to weekdays). The round\'s future date pins are cleared when it is replaced or stopped.',
+    `Control the round of the app's own rotation: "start" begins a round from the saved rotation when none is running; "restart" starts the loop over from its first routine today, and nothing logged before now counts for it; "stop" ends the round and keeps the rotation saved (rotation mode stays selected; write_schedule_mode "week" goes back to weekdays). The round's future date pins are cleared when it is replaced or stopped. ${LAST_CHANGE_NOTE}`,
   input: { action: z.enum(['start', 'restart', 'stop']) },
   async handler(args, ctx) {
     return change(
       ctx,
       'change the round',
       (draft) => {
-        const day = today(ctx.now())
+        const day = today(ctx.now(), zoneOf(draft))
         const q = queueOf(draft)
         if (q && !managedByApp(draft, q)) return refuse("the running queue is a planner's, not the app's rotation; write_rotation with adopt: true takes it over, write_session_queue changes or clears it")
         if (args.action === 'stop') {
@@ -150,6 +144,7 @@ export const writeRotationRound = defineTool({
           stopPass(draft, day)
           return apply(null)
         }
+        if (queueUnusable(draft)) return refuse('a stored round has no routines left; clear it first (write_schedule_mode "week", or write_session_queue null for a planner\'s queue)')
         if (!rotationIds(draft).length) return refuse('there is no saved rotation; set one with write_rotation')
         if (args.action === 'start') {
           if (q) return refuse('a round is already running; restart starts it over')
@@ -180,7 +175,7 @@ export const writeSessionQueue = defineTool({
       ctx,
       args.routineIds ? 'write the queue' : 'clear the queue',
       (draft) => {
-        const day = today(ctx.now())
+        const day = today(ctx.now(), zoneOf(draft))
         if (args.routineIds === null) {
           if (draft.queue == null) return refuse('there is no queue to clear')
           stopPass(draft, day)
@@ -203,40 +198,41 @@ export const writeSessionQueue = defineTool({
 export const writeDayNote = defineTool({
   name: 'write_day_note',
   description:
-    'Note why a day had no training (sick, travel, rest, injured, and/or a line of text), today or earlier; a day with a note is excused: the missed-workout nudge and the workout-day reminder leave it alone, and the app shows the note in its calendar. No tag and no text removes the note. The app offers a new note only on a day without a workout; leap allows it and says so.',
+    `Note why a day had no training (sick, travel, rest, injured, and/or a line of text), today or earlier; a day with a note is excused: the missed-workout nudge and the workout-day reminder leave it alone, and the app shows the note in its calendar. A field left out keeps what the note has; null removes it, and a note with no tag and no text is removed. The app offers a new note only on a day without a workout; leap allows it and says so. ${LAST_CHANGE_NOTE}`,
   input: {
     date: isoDate,
     tag: z.enum(DAY_NOTE_TAGS).nullable().optional(),
     text: z.string().max(DAY_NOTE_MAX).nullable().optional(),
   },
   async handler(args, ctx) {
-    if (args.date > today(ctx.now())) return invalid(`${args.date} is in the future; only today and earlier days take a note`)
-    const tag = args.tag ?? undefined
-    const text = args.text?.trim() || undefined
+    if (args.date > today(ctx.now(), await ctx.store.zone())) return invalid(`${args.date} is in the future; only today and earlier days take a note`)
+    if (args.tag === undefined && args.text === undefined) return invalid('give a tag or a text (null removes one)')
     return change(
       ctx,
       'save the day note',
       (draft, { now }) => {
         const notes = writableMap(draft, 'dayNotes')
         const previous = dayNoteOf(draft, args.date)
-        if (!previous && !tag && !text) return refuse(`there is no note on ${args.date} to remove`)
-        const same = JSON.stringify(previous) === JSON.stringify(tag || text ? { ...(tag ? { tag } : {}), ...(text ? { text } : {}) } : null)
+        const tag = args.tag === undefined ? previous?.tag : (args.tag ?? undefined)
+        const text = args.text === undefined ? previous?.text : args.text?.trim() || undefined
+        const note = tag || text ? { ...(tag ? { tag } : {}), ...(text ? { text } : {}) } : null
+        if (!previous && !note) return refuse(`there is no note on ${args.date} to remove`)
         // A cleared note is a stamped empty entry, never a deleted key: another device would bring the key back.
         // An unchanged note is not stamped again: a fresh stamp would outrank an unsynced edit elsewhere.
-        if (!same) notes[args.date] = { ...(tag ? { tag } : {}), ...(text ? { text } : {}), _ts: now }
+        if (JSON.stringify(previous) !== JSON.stringify(note)) notes[args.date] = { ...(note ?? {}), _ts: now }
         const trained = listOf(draft, 'workouts').some((w) => w.d === args.date)
-        return apply({ previous, trained })
+        return apply({ previous, note, trained })
       },
       (r) => ({
         date: args.date,
-        note: tag || text ? { ...(tag ? { tag } : {}), ...(text ? { text } : {}) } : null,
+        note: r.note,
         ...(r.previous ? { previous: r.previous } : {}),
-        ...(r.trained && (tag || text) ? { warning: 'a workout is logged on this day; the app itself only offers a note on a day without training' } : {}),
+        ...(r.trained && r.note ? { warning: 'a workout is logged on this day; the app itself only offers a note on a day without training' } : {}),
       }),
       {
-        verify: (s) => {
+        verify: (s, r) => {
           const stored = readDayNote(isRecord(s.dayNotes) ? s.dayNotes[args.date] : undefined)
-          return JSON.stringify(stored) === JSON.stringify(tag || text ? { ...(tag ? { tag } : {}), ...(text ? { text } : {}) } : null) ? [] : [`dayNotes ${args.date}`]
+          return JSON.stringify(stored) === JSON.stringify(r.note) ? [] : [`dayNotes ${args.date}`]
         },
       },
     )

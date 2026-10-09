@@ -26,7 +26,7 @@ describe('read_profile', () => {
       lastWorkout: '2026-10-05',
       workoutsLast7Days: 1,
       workoutsLast30Days: 2,
-      today: { date: '2026-10-07', weekday: 'Wednesday', planned: [{ id: LEGS, name: 'Leg Day' }], plannedBy: 'weekday', done: [] },
+      today: { date: '2026-10-07', weekday: 'Wednesday', routines: [{ id: LEGS, name: 'Leg Day' }], plannedBy: 'weekday', workouts: [] },
       schedule: 'week',
       nextTraining: { date: '2026-10-11', weekday: 'Sunday', routines: [{ id: 'r-pull', name: 'Pull Day' }] },
       bodyWeight: { date: '2026-10-05', weight: 78.4 },
@@ -40,7 +40,7 @@ describe('read_profile', () => {
   it('works for a profile that never synced', async () => {
     const { h } = await setup(null)
     const r = await h.call('read_profile')
-    expect(r.json).toMatchObject({ synced: false, counts: { workouts: 0 }, today: { rest: true, done: [] } })
+    expect(r.json).toMatchObject({ synced: false, counts: { workouts: 0 }, today: { rest: true, workouts: [] } })
     await h.close()
   })
 })

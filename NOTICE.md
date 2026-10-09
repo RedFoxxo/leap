@@ -20,6 +20,13 @@ source file in openGym is named next to each port:
 - `src/domain/dumbbells.ts`: dumbbell weight meanings (`frontend/src/lib/dumbbells.js`)
 - `src/domain/stats.ts`: 1RM formulas (`frontend/src/lib/onerm.js`)
 - `src/domain/routine-items.ts`: pyramid rules (`frontend/src/lib/pyramid.js`)
+- `src/domain/sets.ts`, `src/domain/workout-items.ts`, `src/domain/workouts.ts`: set
+  modes, best weight, per-side intensifiers, workout keys and edit comparison
+  (`frontend/src/lib/workout-model.js`, `history.js`, `workout-date.js`,
+  `session-edit.js`)
+- `src/tools/exercises/write.ts`: muscle reading of custom exercises and link host
+  check (`frontend/src/lib/muscles.js`, `frontend/src/sheets.jsx`,
+  `frontend/src/lib/media-refs.js`)
 - `data/exercises.json`: the exercise catalogue (`catalogue/exercises/`, below)
 
 openGym — Copyright (C) 2026 Duarte Santos.
@@ -30,7 +37,8 @@ leap ships the text data of openGym's exercise catalogue (ids, names, body
 parts, equipment, muscles, categories and instruction steps), generated from
 openGym's `catalogue/` at the release recorded in the file's `source` field. The
 catalogue is openGym's own and covered by the AGPL, except for the 1,324
-entries marked `"textSource": "exercisedb"`, whose names, muscles and
+entries marked `"textSource": "exercisedb"` in openGym (`"exercisedb": true`
+in leap's file), whose names, muscles and
 instructions originate from [ExerciseDB v1](https://exercisedb.dev/) by
 AscendAPI and reached openGym through
 [hasaneyldrm/exercises-dataset](https://github.com/hasaneyldrm/exercises-dataset)

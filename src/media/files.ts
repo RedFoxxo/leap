@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync, unlinkSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { inspect, KIND_OF, type MediaInfo, type MediaMime } from './inspect.js'
 import { stripMetadata } from './strip.js'
 
@@ -81,24 +81,37 @@ export const extensionOf = (mime: string) => (Object.hasOwn(KIND_OF, mime) ? EXT
 /**
  * Writes a new file; an existing path is never overwritten. A directory gets
  * `<hash>.<ext>`; a file name must carry the extension of the file's type, and
- * no part of the path may be hidden (shells and desktops load files from
- * hidden folders such as ~/.bashrc.d or ~/.config/autostart).
+ * no part of the path, as given or with links resolved, may be hidden (shells
+ * and desktops load files from hidden folders such as ~/.bashrc.d or
+ * ~/.config/autostart).
  */
 export function saveNew(target: string, hash: string, mime: string, bytes: Uint8Array): string {
-  let path = expandPath(target)
+  const given = expandPath(target)
   const ext = extensionOf(mime)
   let isDir = false
   try {
-    isDir = statSync(path).isDirectory()
+    isDir = statSync(given).isDirectory()
   } catch {
     // not there yet: a file name
   }
-  if (isDir) path = join(path, `${hash}.${ext}`)
-  else {
+  let name = `${hash}.${ext}`
+  if (!isDir) {
+    name = basename(given)
     const allowed = ext === 'jpg' ? ['jpg', 'jpeg'] : [ext]
-    if (!allowed.some((e) => path.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
+    if (!allowed.some((e) => name.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
   }
-  if (path.split(sep).some((part) => part.startsWith('.'))) throw new Error('downloads are not saved in hidden folders or as hidden files')
+  // The folder as it really is, so a link to a hidden folder counts as one.
+  const folder = isDir ? given : dirname(given)
+  let real: string
+  try {
+    real = realpathSync(folder)
+  } catch {
+    throw new Error(`the folder ${folder} does not exist`)
+  }
+  const path = join(real, name)
+  if (given.split(sep).some((part) => part.startsWith('.')) || path.split(sep).some((part) => part.startsWith('.'))) {
+    throw new Error('downloads are not saved in hidden folders or as hidden files')
+  }
   const fd = openSync(path, 'wx', 0o600)
   try {
     for (let done = 0; done < bytes.length; ) done += writeSync(fd, bytes, done, bytes.length - done)

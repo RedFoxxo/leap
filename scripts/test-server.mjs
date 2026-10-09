@@ -98,7 +98,7 @@ async function start() {
 
   writeFileSync(
     `${DIR}/env`,
-    `OPENGYM_URL=${ORIGIN}\nOPENGYM_TOKEN=${paired.json.token}\nOPENGYM_TEST_PASSWORD=${PROFILE.password}\n`,
+    `OPENGYM_URL=${ORIGIN}\nOPENGYM_TOKEN=${paired.json.token}\n`,
     { mode: 0o600 },
   )
   process.stderr.write(`openGym test server on ${ORIGIN}, admin profile "${PROFILE.name}" (${uid}). Env: ${DIR}/env\n`)

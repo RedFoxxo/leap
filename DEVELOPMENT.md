@@ -1,7 +1,7 @@
 # Developing leap
 
-`CLAUDE.md` holds the architecture, domain rules, conventions and the confirmed
-openGym API surface. Read it before changing behaviour.
+`CLAUDE.md` holds the architecture, domain rules and conventions;
+`docs/OPENGYM.md` what leap relies on in openGym. Read both before changing behaviour.
 
 ## From source
 
@@ -78,8 +78,10 @@ from Gym visual for openGym only.
 2. Regenerate the catalogue from the new tag.
 3. Set `OPENGYM` in `src/version.ts`, the README's compatibility table, the
    changelog line and the test server's image tag (a test keeps them equal).
-4. Run the live tests against the new image.
-5. Raising `OPENGYM.minimum` drops servers that worked before: say so in the
+4. `npm run build`, then `node scripts/check-parity.mjs <openGym checkout>`: leap's ports
+   (sync stamps, rotation and queue) against openGym's own code on randomised documents.
+5. Run the live tests against the new image.
+6. Raising `OPENGYM.minimum` drops servers that worked before: say so in the
    changelog.
 
 ## Branches

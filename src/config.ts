@@ -22,18 +22,23 @@ function baseUrlOf(env: NodeJS.ProcessEnv, problems: string[]): string {
   try {
     url = new URL(raw)
   } catch {
-    problems.push(`OPENGYM_URL is not a valid URL: "${raw}"`)
+    // Not echoed: a malformed value can still hold a password.
+    problems.push('OPENGYM_URL is not a valid URL')
     return ''
   }
+  // Checked first, and every message below shows the URL without them.
+  if (url.username || url.password) {
+    problems.push('OPENGYM_URL must not contain credentials')
+    return ''
+  }
+  const shown = `${url.protocol}//${url.host}${url.pathname}`
   const local = LOCAL_HOSTS.includes(url.hostname)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    problems.push(`OPENGYM_URL must be an https URL (the token is sent with every request), got "${raw}"`)
+    problems.push(`OPENGYM_URL must be an https URL (the token is sent with every request), got "${shown}"`)
   } else if (/\/api(\/|$)/i.test(url.pathname)) {
-    problems.push(`OPENGYM_URL must be the instance root without /api/..., got "${raw}"`)
+    problems.push(`OPENGYM_URL must be the instance root without /api/..., got "${shown}"`)
   } else if (url.search || url.hash) {
     problems.push('OPENGYM_URL must not contain a query string or fragment')
-  } else if (url.username || url.password) {
-    problems.push('OPENGYM_URL must not contain credentials')
   } else {
     return `${url.origin}${url.pathname}`.replace(/\/+$/, '')
   }

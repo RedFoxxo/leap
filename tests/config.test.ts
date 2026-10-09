@@ -31,6 +31,17 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...base, OPENGYM_URL: 'http://localhost:8080' }).baseUrl).toBe('http://localhost:8080')
   })
 
+  it('never prints credentials from the URL', () => {
+    for (const url of ['http://user:hunter2@gym.example.com', 'https://user:hunter2@gym.example.com/api', 'ht!tp://user:hunter2@x']) {
+      expect(() => loadConfig({ ...base, OPENGYM_URL: url })).toThrow()
+      try {
+        loadConfig({ ...base, OPENGYM_URL: url })
+      } catch (error) {
+        expect((error as Error).message).not.toContain('hunter2')
+      }
+    }
+  })
+
   it('rejects credentials, query strings and fragments', () => {
     expect(() => loadConfig({ ...base, OPENGYM_URL: 'https://a:b@gym.example.com' })).toThrow(/credentials/)
     expect(() => loadConfig({ ...base, OPENGYM_URL: 'https://gym.example.com/?x=1' })).toThrow(/query string/)

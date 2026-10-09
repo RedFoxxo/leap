@@ -14,8 +14,8 @@ import { change, RESURRECTION_NOTE } from '../write.js'
  * accessories bench and pull-up bar (openGym `scripts/catalogue/validate.mjs` and
  * `frontend/src/lib/equipment.js`, v1.4.0).
  */
-const BODY_PARTS = ['back', 'cardio', 'chest', 'full body', 'lower arms', 'lower legs', 'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'] as const
-const EQUIPMENT = [
+export const BODY_PARTS = ['back', 'cardio', 'chest', 'full body', 'lower arms', 'lower legs', 'neck', 'shoulders', 'upper arms', 'upper legs', 'waist'] as const
+export const EQUIPMENT = [
   'body weight', 'cable', 'leverage machine', 'assisted', 'medicine ball', 'stability ball', 'band', 'barbell', 'rope',
   'dumbbell', 'ez barbell', 'sled machine', 'upper body ergometer', 'kettlebell', 'olympic barbell', 'weighted',
   'bosu ball', 'resistance band', 'roller', 'skierg machine', 'hammer', 'smith machine', 'wheel roller',
@@ -29,9 +29,110 @@ export const APP_MUSCLES = [
 ] as const
 
 const muscles = z.array(z.enum(APP_MUSCLES)).max(APP_MUSCLES.length)
-const inMapOrder = (list: readonly string[]) => APP_MUSCLES.filter((m) => list.includes(m))
 
-/** A link the app accepts: http(s), a plausible host, no credentials; a bare host gets https://. */
+/*
+ * How the app reads an exercise's muscles when it opens one for editing, ported from openGym
+ * `frontend/src/lib/muscles.js` (inMuscleOrder, ALIAS, hasExplicitMuscleMetadata, muscleGroupsOf)
+ * and `frontend/src/sheets.jsx` CustomExForm, v1.4.0 (28b7e4dc). A custom exercise stored without
+ * `primaries` (an import, an older app) is seeded from its target and secondary muscles.
+ */
+
+/** In the body map's order; names it does not know keep their order at the end, as in the app. */
+const inMuscleOrder = (list: readonly string[]) => {
+  const at = (m: string) => {
+    const i = (APP_MUSCLES as readonly string[]).indexOf(m)
+    return i < 0 ? APP_MUSCLES.length : i
+  }
+  return [...list].sort((a, b) => at(a) - at(b))
+}
+
+/** Every spelling of a muscle in the dataset, onto the body map's names; null cannot be drawn. */
+const MUSCLE_ALIAS: Record<string, string | null> = {
+  abs: 'abs', pectorals: 'chest', biceps: 'biceps', glutes: 'gluteal', delts: 'deltoids',
+  triceps: 'triceps', 'upper back': 'upper-back', lats: 'upper-back', calves: 'calves',
+  quads: 'quadriceps', forearms: 'forearm', hamstrings: 'hamstring', spine: 'lower-back',
+  traps: 'trapezius', adductors: 'adductors', 'serratus anterior': 'serratus',
+  abductors: 'gluteal', 'levator scapulae': 'trapezius', 'cardiovascular system': 'cardiovascular system',
+  shoulders: 'deltoids', deltoids: 'deltoids', 'rear deltoids': 'deltoids',
+  'rotator cuff': 'deltoids', quadriceps: 'quadriceps', core: 'abs', abdominals: 'abs',
+  'lower abs': 'abs', chest: 'chest', 'upper chest': 'chest', 'hip flexors': 'hip-flexors',
+  obliques: 'obliques', 'lower back': 'lower-back', rhomboids: 'upper-back',
+  trapezius: 'trapezius', back: 'upper-back', 'latissimus dorsi': 'upper-back',
+  brachialis: 'biceps', soleus: 'calves', shins: 'tibialis', wrists: 'forearm',
+  'wrist flexors': 'forearm', 'wrist extensors': 'forearm', 'grip muscles': 'forearm',
+  groin: 'adductors', 'inner thighs': 'adductors',
+  ankles: null, feet: null, hands: null, 'ankle stabilizers': null, sternocleidomastoid: null,
+}
+
+/** The muscles a body part stands for when nothing else is known, in the app's order. */
+const BY_BODY_PART: Record<string, string[]> = {
+  chest: ['chest'], back: ['upper-back', 'lower-back'], shoulders: ['deltoids'], 'upper arms': ['biceps', 'triceps'],
+  'lower arms': ['forearm'], waist: ['abs', 'obliques'], 'upper legs': ['quadriceps', 'hamstring', 'gluteal'],
+  'lower legs': ['calves', 'tibialis'], neck: ['trapezius'], 'full body': ['chest', 'upper-back', 'gluteal', 'quadriceps', 'hamstring', 'abs'], cardio: [],
+}
+
+const arrayOf = (v: unknown): unknown[] => (Array.isArray(v) ? v : v == null || v === '' ? [] : [v])
+
+function canonicalMuscle(v: unknown): string | null {
+  const name = String(v || '').toLowerCase().trim()
+  if ((APP_MUSCLES as readonly string[]).includes(name)) return name
+  return Object.hasOwn(MUSCLE_ALIAS, name) ? MUSCLE_ALIAS[name]! : null
+}
+
+const canonicalUnique = (values: unknown[]) => [...new Set(values.map(canonicalMuscle).filter((m): m is string => m !== null))]
+
+function firstPresent(ex: Entry, keys: string[]): unknown {
+  for (const k of keys) if (Object.hasOwn(ex, k)) return ex[k]
+  return null
+}
+
+function explicitParts(ex: Entry): { primary: unknown[]; secondary: unknown[] } | null {
+  const primary = firstPresent(ex, ['primaries', 'primaryMuscles', 'primary'])
+  const secondary = firstPresent(ex, ['secondaries', 'secondaryMuscles', 'secondary'])
+  return primary !== null || secondary !== null ? { primary: arrayOf(primary), secondary: arrayOf(secondary) } : null
+}
+
+function explicitGroups(ex: Entry): unknown[] | null {
+  for (const k of ['muscleGroups', 'muscles', 'targetMuscles']) {
+    if (!Object.hasOwn(ex, k)) continue
+    const groups = arrayOf(ex[k])
+    return groups.length ? groups : null
+  }
+  return null
+}
+
+function hasExplicitMuscles(ex: Entry): boolean {
+  const parts = explicitParts(ex)
+  if (parts && [...parts.primary, ...parts.secondary].some(canonicalMuscle)) return true
+  if (explicitGroups(ex)?.some(canonicalMuscle)) return true
+  return [ex.tg, ex.mg, ...arrayOf(ex.sm)].some(canonicalMuscle)
+}
+
+function muscleGroupsOf(ex: Entry): string[] {
+  const parts = explicitParts(ex)
+  const useParts = !!parts && [...parts.primary, ...parts.secondary].some(canonicalMuscle)
+  const out = canonicalUnique(useParts ? [...parts!.primary, ...parts!.secondary] : (explicitGroups(ex) ?? [ex.tg, ex.mg, ...arrayOf(ex.sm)]))
+  return out.length || useParts ? out : canonicalUnique(BY_BODY_PART[String(ex.bp)] ?? [])
+}
+
+/** The primary and secondary muscles the app's form starts with for a stored exercise. */
+function openedMuscles(c: Entry): { primaries: string[]; secondaries: string[] } {
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((m): m is string => typeof m === 'string') : [])
+  if (Array.isArray(c.primaries) && c.primaries.length) return { primaries: strings(c.primaries), secondaries: strings(c.secondaries) }
+  const groups = hasExplicitMuscles(c) ? muscleGroupsOf(c) : []
+  return { primaries: c.bp === 'cardio' ? ['cardiovascular system'] : groups.slice(0, 1), secondaries: groups.slice(1) }
+}
+
+/** A host a browser could reach: dotted labels, localhost or an IPv6 address (openGym `frontend/src/lib/media-refs.js` plausibleHost, v1.4.0). */
+function plausibleHost(host: string): boolean {
+  if (host.startsWith('[') && host.endsWith(']')) return true
+  const h = host.replace(/\.$/, '').toLowerCase()
+  if (h === 'localhost') return true
+  const labels = h.split('.')
+  return labels.length >= 2 && labels.every((l) => /^(?!-)[a-z0-9-]{1,63}(?<!-)$/i.test(l))
+}
+
+/** A link the app accepts: http(s), a plausible host, no credentials; a bare host gets https:// (media-refs.js cleanUrl). */
 export function cleanUrl(raw: string): string | null {
   let s = raw.trim()
   if (!s || s.length > 2048) return null
@@ -47,9 +148,7 @@ export function cleanUrl(raw: string): string | null {
     return null
   }
   if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !u.hostname || u.username || u.password) return null
-  const host = u.hostname
-  const plausible = host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.startsWith('[') || /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
-  return plausible && u.href.length <= 2048 ? u.href : null
+  return plausibleHost(u.hostname) && u.href.length <= 2048 ? u.href : null
 }
 
 export const writeCustomExercise = defineTool({
@@ -97,20 +196,23 @@ export const writeCustomExercise = defineTool({
           if (taken) return refuse(`"${taken.name}" already exists (${taken.id})`)
         }
         const bodyPart = args.bodyPart ?? String(c.bp ?? '')
-        const oldPrimaries = Array.isArray(c.primaries) ? c.primaries.filter((m): m is string => typeof m === 'string') : []
-        const oldSecondaries = Array.isArray(c.secondaries) ? c.secondaries.filter((m): m is string => typeof m === 'string') : []
-        const primaries = bodyPart === 'cardio' ? ['cardiovascular system'] : inMapOrder(args.primaryMuscles ?? oldPrimaries)
-        const secondaries = inMapOrder((args.secondaryMuscles ?? oldSecondaries).filter((m) => !primaries.includes(m)))
-        if (args.target && !primaries.includes(args.target)) return refuse(`target "${args.target}" is not one of the primary muscles`)
-        const target = args.target ?? (typeof c.tg === 'string' && primaries.includes(c.tg) ? c.tg : (primaries[0] ?? ''))
+        // Muscles are rewritten only when asked: the app's form rewrites them on every save, but a
+        // rename should not turn an imported exercise's muscles into the form's reading of them.
+        if (args.primaryMuscles || args.secondaryMuscles || args.target || args.bodyPart) {
+          const opened = openedMuscles(c)
+          // Off cardio, the cardio pseudo-muscle goes; the app's form cannot untick it.
+          const primaries = bodyPart === 'cardio' ? ['cardiovascular system'] : inMuscleOrder((args.primaryMuscles ?? opened.primaries).filter((m) => m !== 'cardiovascular system'))
+          const secondaries = inMuscleOrder((args.secondaryMuscles ?? opened.secondaries).filter((m) => !primaries.includes(m)))
+          if (args.target && !primaries.includes(args.target)) return refuse(`target "${args.target}" is not one of the primary muscles`)
+          c.tg = args.target ?? (typeof c.tg === 'string' && primaries.includes(c.tg) ? c.tg : (primaries[0] ?? ''))
+          c.primaries = primaries
+          c.secondaries = secondaries
+          c.sm = secondaries
+          c.muscleGroups = [...primaries, ...secondaries]
+        }
         c.n = name
         c.bp = bodyPart
         c.eq = args.equipment ?? c.eq
-        c.tg = target
-        c.primaries = primaries
-        c.secondaries = secondaries
-        c.sm = secondaries
-        c.muscleGroups = [...primaries, ...secondaries]
         if (args.description !== undefined) c.desc = args.description.trim()
         else if (c.desc === undefined) c.desc = ''
         if (args.url !== undefined) {

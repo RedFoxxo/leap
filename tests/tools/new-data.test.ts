@@ -30,6 +30,43 @@ describe('body measurements', () => {
     await h.close()
   })
 
+  it('makes no list of custom kinds until a kind is added', async () => {
+    const { h, doc } = await setup()
+    await h.call('write_measurement', { date: '2026-10-06', values: { waist: 81 } })
+    expect(doc()).not.toHaveProperty('customMeasurements')
+    expect(doc().edited ?? {}).not.toHaveProperty('customMeasurements')
+    expect(doc().measurements[0].other).toEqual([])
+    await h.close()
+  })
+
+  it('takes custom kinds with numeric ids as the app does, and shows their latest value', async () => {
+    const state = {
+      ...profile(),
+      customMeasurements: [{ id: 7, name: 'Glutes', enabled: true }],
+      measurements: [{ d: '2026-10-01', t: 1, waist: 82, other: [{ id: 7, name: 'Glutes', value: 97 }] }],
+    }
+    const { h, doc } = await setup(state)
+    const r = await h.call('write_measurement', { date: '2026-10-06', custom: { glutes: 98.5 } })
+    expect(r.json).not.toHaveProperty('createdKinds')
+    expect(doc().customMeasurements).toEqual([{ id: 7, name: 'Glutes', enabled: true }])
+    expect(doc().measurements[1].other).toEqual([{ id: '7', name: 'Glutes', value: 98.5 }])
+    await h.call('write_measurement', { date: '2026-10-01', values: { chest: 100 } })
+    expect(doc().measurements[0].other).toEqual([{ id: 7, name: 'Glutes', value: 97 }])
+    const read = await h.call('read_measurements')
+    expect(read.json.latest).toMatchObject({ waist: { value: 82 }, other: { Glutes: { value: 98.5, date: '2026-10-06', change: 1.5 } } })
+    expect(read.json.customKinds).toEqual([{ name: 'Glutes' }])
+    await h.close()
+  })
+
+  it('reports a value that did not persist, not just a missing day', async () => {
+    const { h, fake } = await setup()
+    fake.stub.first({ method: 'GET', path: '/api/data', times: 2, body: () => ({ state: fake.state, rev: fake.rev }) })
+    fake.afterApply = (f) => f.otherDeviceWrites((s) => void ((s.measurements as any[])[0].waist = 90))
+    const r = await h.call('write_measurement', { date: '2026-10-06', values: { waist: 81 } })
+    expect(r.json).toMatchObject({ saved: 'partly', notPersisted: ['measurements 2026-10-06 waist'] })
+    await h.close()
+  })
+
   it('takes and shows inches for a lb profile, stores cm', async () => {
     const { h, doc } = await setup({ ...profile(), unit: 'lb' })
     await h.call('write_measurement', { values: { waist: 32 } })

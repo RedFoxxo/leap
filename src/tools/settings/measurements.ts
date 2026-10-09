@@ -47,7 +47,8 @@ function customKinds(state: State | null): CustomKind[] {
   const seen = new Set<string>()
   const out: CustomKind[] = []
   for (const c of listOf(state, 'customMeasurements')) {
-    const id = typeof c.id === 'string' ? c.id : ''
+    // Any id the app takes, as a string (normalizeMeasurementsState).
+    const id = c.id ? String(c.id) : ''
     const name = typeof c.name === 'string' ? c.name.trim() : ''
     if (!id || !name || seen.has(id)) continue
     seen.add(id)
@@ -74,7 +75,7 @@ function shown(e: Entry, state: State | null) {
 export const readMeasurements = defineTool({
   name: 'read_measurements',
   description:
-    'Body measurements (waist, arms, body fat, the profile\'s own kinds …), newest first: lengths in cm, or in inches for a lb profile, as the app shows them; body fat in %. Also the latest value of each kind with its change since the first one in the range, which kinds the app\'s form shows, and the custom kinds.',
+    'Body measurements (waist, arms, body fat, the profile\'s own kinds …), newest first: lengths in cm, or in inches for a lb profile, as the app shows them; body fat in %. Also the latest value of each kind (the profile\'s own kinds under `other`, by name) with its change since the first one in the range, which kinds the app\'s form shows, and the custom kinds.',
   input: { from: isoDate.optional(), to: isoDate.optional(), limit: limit(30, 2000) },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
@@ -93,13 +94,27 @@ export const readMeasurements = defineTool({
       if (last) latest[k] = { value: Number(last[k]), date: last.date, ...(first && first !== last ? { change: round1(Number(last[k]) - Number(first[k])) } : {}) }
     }
     const enabled = Array.isArray(state?.measurementEnabled) ? state.measurementEnabled.filter((k): k is string => typeof k === 'string') : SHOWN_BY_DEFAULT
+    const kinds = customKinds(state)
+    const other: Record<string, { value: number; date: unknown; change?: number }> = {}
+    const inches = lengthUnit(state) === 'in'
+    for (const id of new Set(inRange.flatMap((e) => listOf(e, 'other').map((o) => (o.id ? String(o.id) : ''))).filter(Boolean))) {
+      const withValue = inRange
+        .map((e) => ({ date: e.d, o: listOf(e, 'other').find((o) => o.id && String(o.id) === id) }))
+        .map(({ date, o }) => ({ date, name: o?.name, value: valid(o?.value) }))
+        .filter((x): x is { date: unknown; name: unknown; value: number } => x.value !== null)
+      const last = withValue.at(-1)
+      if (!last) continue
+      const name = kinds.find((c) => c.id === id)?.name ?? String(last.name ?? 'Other')
+      const shownValue = (v: number) => (inches ? round1(v / 2.54) : v)
+      other[name] = { value: shownValue(last.value), date: last.date, ...(withValue.length > 1 ? { change: round1(shownValue(last.value) - shownValue(withValue[0]!.value)) } : {}) }
+    }
     const max = args.limit ?? 30
     const newest = rows.reverse()
     return success({
       lengthUnit: lengthUnit(state),
       shownInApp: MEASUREMENT_KINDS.filter((k) => enabled.includes(k)),
-      ...(customKinds(state).length ? { customKinds: customKinds(state).map((c) => ({ name: c.name, ...(c.enabled ? {} : { hidden: true }) })) } : {}),
-      latest,
+      ...(kinds.length ? { customKinds: kinds.map((c) => ({ name: c.name, ...(c.enabled ? {} : { hidden: true }) })) } : {}),
+      latest: { ...latest, ...(Object.keys(other).length ? { other } : {}) },
       total: newest.length,
       ...(newest.length > max ? { truncated: true } : {}),
       entries: newest.slice(0, max),
@@ -122,8 +137,9 @@ export const writeMeasurement = defineTool({
     unit: z.enum(['cm', 'in']).optional(),
   },
   async handler(args, ctx) {
-    const date = args.date ?? today(ctx.now())
-    if (date > today(ctx.now())) return invalid(`${date} is in the future; measurements are logged for a day that happened`)
+    const day = today(ctx.now(), await ctx.store.zone())
+    const date = args.date ?? day
+    if (date > day) return invalid(`${date} is in the future; measurements are logged for a day that happened`)
     const given = Object.entries(args.values ?? {}).filter(([, v]) => v !== undefined) as [Kind, number | null][]
     const custom = Object.entries(args.custom ?? {})
     if (!given.length && !custom.length) return invalid('no measurement given')
@@ -134,7 +150,6 @@ export const writeMeasurement = defineTool({
       (draft, { now }) => {
         const unit = args.unit ?? lengthUnit(draft)
         const cm = (v: number | null) => (v === null ? null : valid(unit === 'in' ? v * 2.54 : v))
-        const kinds = writableList(draft, 'customMeasurements')
         const known = customKinds(draft)
         const created: string[] = []
         const otherValues = new Map<string, { name: string; value: number | null }>()
@@ -143,7 +158,8 @@ export const writeMeasurement = defineTool({
           if (!kind) {
             if (Object.values(LABELS).some((l) => l.toLowerCase() === name.toLowerCase())) return refuse(`"${name}" is a built-in kind; give it in values`)
             kind = { id: newId('', now + created.length), name, enabled: true }
-            kinds.push({ ...kind })
+            // The list exists only once it has a kind: an empty one would be a setting changed for nothing.
+            writableList(draft, 'customMeasurements').push({ ...kind })
             known.push(kind)
             created.push(name)
           }
@@ -155,21 +171,25 @@ export const writeMeasurement = defineTool({
         const entry: Entry = { ...(old ?? {}), d: date, t: now }
         for (const k of MEASUREMENT_KINDS) entry[k] = valid(old?.[k])
         for (const [k, v] of given) entry[k] = k === 'bodyFat' ? (v === null ? null : valid(v)) : cm(v)
-        const other = new Map(listOf(old, 'other').filter((o) => typeof o.id === 'string').map((o) => [String(o.id), { ...o }]))
+        const other = new Map(listOf(old, 'other').filter((o) => o.id).map((o) => [String(o.id), { ...o }]))
         for (const kind of known) if (!other.has(kind.id)) other.set(kind.id, { id: kind.id, name: kind.name, value: null })
         for (const [id, o] of otherValues) other.set(id, { ...(other.get(id) ?? {}), id, name: o.name, value: o.value })
         entry.other = [...other.values()]
         const hasValue = MEASUREMENT_KINDS.some((k) => entry[k] !== null) || listOf(entry, 'other').some((o) => valid(o.value) !== null)
         if (!hasValue) return refuse(old ? `that would leave ${date} without any measurement; delete_measurement removes the day` : 'no value to log')
+        const written = {
+          values: given.map(([k]) => [k, entry[k] as number | null] as const),
+          other: [...otherValues].map(([id, o]) => ({ id, name: o.name, value: o.value })),
+        }
         const unchanged = old && JSON.stringify({ ...old, t: 0 }) === JSON.stringify({ ...entry, t: 0 })
         // Unchanged, the day keeps its stamp: a fresh one would outrank an unsynced change elsewhere.
-        if (unchanged) return apply({ entry: shown(old, draft), unit: lengthUnit(draft), created, hidden: [] as Kind[], replaced: true })
+        if (unchanged) return apply({ entry: shown(old, draft), unit: lengthUnit(draft), created, hidden: [] as Kind[], replaced: true, written })
         if (i >= 0) list[i] = entry
         else list.push(entry)
         draft.measurements = list.filter(isRecord).sort((a, b) => String(a.d).localeCompare(String(b.d)))
         const enabled = Array.isArray(draft.measurementEnabled) ? draft.measurementEnabled : SHOWN_BY_DEFAULT
         const hidden = given.filter(([k, v]) => v !== null && !enabled.includes(k)).map(([k]) => k)
-        return apply({ entry: shown(entry, draft), unit: lengthUnit(draft), created, hidden, replaced: !!old })
+        return apply({ entry: shown(entry, draft), unit: lengthUnit(draft), created, hidden, replaced: !!old, written })
       },
       (r) => ({
         measurement: r.entry,
@@ -178,7 +198,17 @@ export const writeMeasurement = defineTool({
         ...(r.created.length ? { createdKinds: r.created } : {}),
         ...(r.hidden.length ? { note: `${r.hidden.join(', ')} ${r.hidden.length > 1 ? 'are' : 'is'} saved but hidden in the app's form; turn ${r.hidden.length > 1 ? 'them' : 'it'} on in the app's measurement settings` } : {}),
       }),
-      { verify: (s) => (listOf(s, 'measurements').some((e) => e.d === date) ? [] : [`measurements ${date}`]) },
+      {
+        verify: (s, r) => {
+          const e = listOf(s, 'measurements').find((x) => x.d === date)
+          if (!e) return [`measurements ${date}`]
+          const stored = (id: string) => listOf(e, 'other').find((o) => o.id && String(o.id) === id)?.value
+          return [
+            ...r.written.values.filter(([k, v]) => valid(e[k]) !== v).map(([k]) => `measurements ${date} ${k}`),
+            ...r.written.other.filter((o) => valid(stored(o.id)) !== o.value).map((o) => `measurements ${date} ${o.name}`),
+          ]
+        },
+      },
     )
   },
 })

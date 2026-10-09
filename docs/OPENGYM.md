@@ -62,7 +62,7 @@ Main keys (default in brackets):
 | `exNotes` (`{}`) | Exercise id → standing note |
 | `favEx` (`[]`) | Favourite exercise ids |
 | `equipProfiles` (`[]`), `activeEquipId`, `equipFilterOn` | Equipment profiles |
-| `reminder` (`{ on: false, time: "08:00", tz: null }`) | Daily push; the server reads it |
+| `reminder` (`{ on: false, time: "08:00", tz: null }`) | Daily push; the server reads it. `tz` is the phone's zone (kept up to date while the reminder is on); the server also takes it as the user's day (`server.js` userNow, `queue.js` dayIn) |
 | `restSec` (90), `restPauseSec` (15), `effort` (`null` = none/legacy, `rir`, `rpe`) | Workout settings |
 | `weekStart` (1), `startFrom` (`plan`), `logRef` (`last`), `workoutView` (`cards`), `wdec` (1), `speedUnit` (`null`) | Display and session settings |
 | `lang`, `theme`, `accent`, `body`, `sound`, `keepAwake`, ... | Plain settings |
@@ -104,9 +104,9 @@ leap must keep every key it does not know, unchanged.
     `favEx` is always an add-back.
   - `exWeights`: per exercise, the better weight.
 - How a change is stamped, in one time `now = max(clock, highest stamp + 1)`:
-  ported to leap as `src/state/stamps.ts` (openGym `stampChange`). leap's port
-  was compared with openGym's own `stampChange` on 4,000 randomised changes, with
-  no difference (2026-10-09).
+  ported to leap as `src/state/stamps.ts` (openGym `stampChange`).
+  `scripts/check-parity.mjs` compares the port with openGym's own `stampChange`
+  on randomised changes (no difference at v1.4.0).
 - **Old devices**: a phone still on openGym 1.3.9 does not stamp. Its stale
   values can overwrite newer settings when it never read an updated copy, and
   its merge can bring back an entry deleted elsewhere. Only then can a leap
@@ -129,7 +129,7 @@ A logged workout:
 | Field | Meaning |
 |---|---|
 | `id` | Unique id |
-| `d` | Local calendar day `YYYY-MM-DD` (no time zone stored) |
+| `d` | Local calendar day `YYYY-MM-DD` (no time zone stored; leap takes the user's zone from `reminder.tz`, as the server does, else the machine's) |
 | `start`, `end` | ms since epoch |
 | `name` | Usually the routine's name |
 | `routineId` | Routine it came from, or `null` |
@@ -138,17 +138,20 @@ A logged workout:
 | `prs` | Exercise ids that set a weight PR in this workout |
 | `bw` | Body weight that day (optional) |
 | `note`, `media` | Optional; `media` is a list of media refs (max 6) |
-| `_ts` | Set when edited after logging |
+| `_ts` | When it was logged or last edited; leap stamps a new workout too |
 
 Set rows (`sets[]`):
 
 - Normal: `{ w, r, done }`, optional `rir` or `rpe`; `failure: true` (taken to
   failure, RIR 0 unless rated; never on a warm-up), `max: true` (a pyramid's Max set).
-- Warm-up: `phase: "warmup"`. Excluded from volume, PRs and muscle balance.
+- Warm-up: `phase: "warmup"` (also read: `"warm-up"`, `"warm_up"`, and the older
+  `warmup: true`). Excluded from volume, PRs and muscle balance.
 - Drop set: `type: "dropset"` with `drops: [{ w, r }]`; drops add to volume.
 - Rest-pause: `type: "restpause"` with `clusters: [{ r, restSec }]`; `r` is the
   total reps, clusters add nothing extra.
-- Per side: `sides: { L, R }`, with the row's own fields mirroring them.
+- Per side: `sides: { L, R }`, with the row's own fields mirroring them; a drop
+  set or rest-pause lives on each side (`sides.L.type/drops/clusters`) and the
+  row mirrors its `type` (`workout-model.js` syncSideAggregate).
 - Timed: `{ sec, w }`; a hold per side is two rows `side: "L"` and `side: "R"`.
   Cardio: `{ min, speed, incline? }`, speed always in km/h, incline in % (0–40).
 - No "assisted" set type (assistance is a property of the exercise; its weight
@@ -163,7 +166,9 @@ Derived when a workout is finished:
 - `vol`: sum of `w × r` over done, non-warm-up rows, plus their drops; an entry
   logged per dumbbell (`target.dbLoad: "each"`) on two-handed work counts twice
   (one bell when per side or named one-arm/single-arm).
-- `topW` per entry: best completed working weight.
+- `topW` per entry: best completed working weight, reps rows first (a timed
+  row's weight counts only when the entry has no reps rows), and the stored
+  `topW` when no row has a usable weight (`history.js` bestWeightForEntry).
 - `prs`: exercises whose best weight beats every earlier workout's best.
 - `exWeights[id]`: updated when the new weight is better (not for back-dated
   entries).
@@ -183,8 +188,11 @@ What the app does when a session is saved, and leap with it (**source**:
   names joined ("A + B", from four on "A + B + N more"), else "Freestyle".
   `bw` is that session's weigh-in, if any. Notes are at most 500 characters.
   Past logs and moves never go beyond today.
-- On a per-side set, drop sets and rest-pause live on each side; leap does not
-  log them there.
+- On a per-side set, drop sets and rest-pause live on each side.
+- A workout saved before ids existed is known by `"<d>|<start>"`; an edit or a
+  move freezes that key as its id (`workout-date.js`). A move keeps the time of
+  day and the length (`retimeWorkout`). An edit is compared without `vol`,
+  `prs` and stamps (`session-edit.js` sameData).
 - An edit replaces the record by id, keeps the entry fields it does not edit,
   and is skipped (no stamp) when nothing changed.
 
@@ -310,15 +318,15 @@ does the same in its own words.
   (**source**: `onerm.js` `bestSetOf`)
 - Weight PR (`prs`): the session's best completed working load beats the best
   of every earlier session; with no earlier load, the first one counts. On an
-  assistance machine (equipment `assisted`) the smaller load is better.
+  assistance machine (see below) the smaller load is better.
   (**source**: `exercises.js` `beatsWeight`, `sheets.jsx` finish flow,
   `workout-date.js` `rebuildPrHistory`). **Verified**: leap marks the same PRs
   as openGym on 30 of the demo profile's 33 workouts; the 3 others are its
   first week, where the demo generator deliberately stores no badges.
 - Assistance machine (**source**: `exercises.js` `isAssisted`): an explicit
   `assisted` boolean on a custom exercise wins; otherwise equipment
-  `leverage machine` and a name matching `assist(ed)` — 8 catalogue exercises.
-  The dataset's equipment `assisted` (15 exercises: partner-assisted stretches
+  `leverage machine` and a name matching `assist(ed)` — 10 catalogue exercises
+  at 1.4.0. The catalogue's equipment `assisted` (partner-assisted stretches
   and the like) is ordinary load. **Verified** against the catalogue.
 - After logging into the past or editing a workout, the app rebuilds badges of
   the touched exercises: walking history in order, a session keeps a badge only
@@ -339,8 +347,8 @@ does the same in its own words.
 
 (**source**: `frontend/src/lib/queue.js`, `rotation.js`, `history.js`
 effectiveRoutineIds, `day-notes.js`; `api/queue.js`, `api/nudge.js`; v1.3.10 and
-v1.4.0. Ported to leap as `src/domain/queue.ts`, checked against openGym's own
-functions on about 47,000 randomised cases with no difference.)
+v1.4.0. Ported to leap as `src/domain/queue.ts`; `scripts/check-parity.mjs`
+checks it against openGym's own functions on randomised cases.)
 
 - `queue = { ids, since, startsOn, label, strict?, rotationId? }` is the live
   round; `rotation = { id, sequence, label }` the saved loop;

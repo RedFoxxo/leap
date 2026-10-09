@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -34,6 +34,25 @@ describe('saveNew', () => {
     expect(() => saveNew(join(d, '.bashrc.d', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/hidden/)
     expect(() => saveNew(join(d, '.x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/hidden/)
     expect(existsSync(join(d, '.bashrc.d', 'x.jpg'))).toBe(false)
+  })
+
+  it('refuses a folder that is a link to a hidden one', () => {
+    const d = dir()
+    mkdirSync(join(d, '.config', 'autostart'), { recursive: true })
+    symlinkSync(join(d, '.config', 'autostart'), join(d, 'start'))
+    symlinkSync(join(d, '.config'), join(d, 'conf'))
+    expect(() => saveNew(join(d, 'start'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/hidden/)
+    expect(() => saveNew(join(d, 'start', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/hidden/)
+    expect(() => saveNew(join(d, 'conf', 'autostart', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/hidden/)
+    expect(readdirSync(join(d, '.config', 'autostart'))).toEqual([])
+    mkdirSync(join(d, 'photos'))
+    symlinkSync(join(d, 'photos'), join(d, 'pics'))
+    expect(saveNew(join(d, 'pics', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toBe(join(realpathSync(d), 'photos', 'x.jpg'))
+  })
+
+  it('refuses a folder that does not exist', () => {
+    const d = dir()
+    expect(() => saveNew(join(d, 'nope', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/does not exist/)
   })
 
   it('treats only real media types as known', () => {

@@ -15,10 +15,10 @@ const formula = z
   .optional()
   .describe("1RM formula; default the one picked in the profile's settings (else epley), as the app does. A single formula gives no estimate above 12 reps; weighted blends all seven and counts reps in reserve, up to 15. 1 rep is the weight itself.")
 
-/** How dumbbell weights are read: in the exercise's current meaning, when it has one. */
+/** How dumbbell weights are read: in the exercise's current meaning (each, total), when it has one. */
 const dumbbellNote = (state: State | null, id: string) => {
   const as = currentDbLoad(state, id)
-  return as === 'as' ? {} : { weightsRead: as === 'each' ? 'per dumbbell' : 'both dumbbells together' }
+  return as === 'as' ? {} : { weightMeans: as }
 }
 
 const oneRm = (b: BestSet | null) => (b ? { estimate: b.estimate, weight: b.w, reps: b.r } : undefined)
@@ -26,25 +26,26 @@ const oneRm = (b: BestSet | null) => (b ? { estimate: b.estimate, weight: b.w, r
 export const readExerciseHistory = defineTool({
   name: 'read_exercise_history',
   description:
-    'Every session of one exercise, newest first: the completed work sets ("100×5", drops as "→ 80×6", per side as "L …/ R …"), work sets, reps, volume, best weight, best estimated 1RM, and whether the session set a weight record or a 1RM record against all earlier sessions (the first load ever logged counts, as in the app). Plus all-time bests. Weights in the profile unit; a dumbbell exercise whose weight was logged per dumbbell or both together is read in its current meaning (weightsRead), as the app does.',
+    'Every session of one exercise, newest first: the completed work sets ("100×5", drops as "→ 80×6", per side as "L …/ R …"), work sets, reps, volume, best weight, best estimated 1RM, and whether the session set a weight record or a 1RM record against all earlier sessions (the first load ever logged counts, as in the app). Plus all-time bests. Weights in the profile unit; a dumbbell exercise whose weight was logged per dumbbell or both together is read in its current meaning, as the app does (weightMeans: each = per dumbbell, total = both together).',
   input: { exerciseId, from: isoDate.optional(), to: isoDate.optional(), limit: limit(20, 1000), formula },
   async handler(args, ctx) {
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { state, exercises } = profile.data
     const f: Formula = args.formula ?? formulaOf(state)
-    const all = exerciseSessions(state, args.exerciseId, exercises, f)
-    if (!all.length && !exercises.get(args.exerciseId)) return failure(`No exercise with id "${args.exerciseId}" and no sessions of it; find ids with read_exercises`)
+    const id = exercises.canonical(args.exerciseId)
+    const all = exerciseSessions(state, id, exercises, f)
+    if (!all.length && !exercises.get(id)) return failure(`No exercise with id "${args.exerciseId}" and no sessions of it; find ids with read_exercises`)
     const bestWeight = all.filter((s) => s.weightRecord).at(-1)
     const best1RM = all.filter((s) => s.estimateRecord).at(-1)
     const inRange = all.filter((s) => (!args.from || s.date >= args.from) && (!args.to || s.date <= args.to)).reverse()
     const max = args.limit ?? 20
     return success({
-      id: args.exerciseId,
-      name: exercises.name(args.exerciseId),
+      id,
+      name: exercises.name(id),
       unit: unitOf(state),
       formula: f,
-      ...dumbbellNote(state, args.exerciseId),
+      ...dumbbellNote(state, id),
       sessionsTotal: all.length,
       ...(all.length ? { firstDone: all[0]!.date, lastDone: all.at(-1)!.date } : {}),
       ...(bestWeight ? { bestWeight: { weight: bestWeight.bestWeight, date: bestWeight.date } } : {}),
@@ -71,7 +72,7 @@ export const readExerciseHistory = defineTool({
 export const readRecords = defineTool({
   name: 'read_records',
   description:
-    'Personal records of every exercise ever logged: best weight (and when), best estimated 1RM with the set it came from, number of sessions, last done. Sort by most recent record (default), by 1RM, or by name. Weights in the profile unit.',
+    'Personal records of every exercise ever logged: best weight (and when), best estimated 1RM with the set it came from, number of sessions, last done. Sort by most recent record (default), by 1RM, or by name. Weights in the profile unit; a dumbbell exercise whose weight was logged per dumbbell or both together is read in its current meaning, as the app does (weightMeans: each = per dumbbell, total = both together).',
   input: {
     sort: z.enum(['recent', 'estimate', 'name']).optional(),
     since: isoDate.optional().describe('Only exercises with a record set on or after this date'),
@@ -91,6 +92,7 @@ export const readRecords = defineTool({
       return {
         id,
         name: exercises.name(id),
+        ...dumbbellNote(state, id),
         sessions: sessions.length,
         ...(sessions.length ? { lastDone: sessions.at(-1)!.date } : {}),
         ...(w ? { bestWeight: { weight: w.bestWeight, date: w.date } } : {}),
@@ -128,8 +130,8 @@ function periodStart(iso: string, by: 'week' | 'month' | 'day', weekStart: numbe
   return addDays(iso, -back)
 }
 
-function range(args: { from?: string | undefined; to?: string | undefined }, defaultDays: number) {
-  const to = args.to ?? today()
+function range(args: { from?: string | undefined; to?: string | undefined }, defaultDays: number, now: number, zone: string | undefined) {
+  const to = args.to ?? today(now, zone)
   return { from: args.from ?? addDays(to, -(defaultDays - 1)), to }
 }
 
@@ -145,7 +147,7 @@ export const readTrainingSummary = defineTool({
     groupBy: z.enum(['week', 'month', 'day']).optional(),
   },
   async handler(args, ctx) {
-    const { from, to } = range(args, 84)
+    const { from, to } = range(args, 84, ctx.now(), args.to ? undefined : await ctx.store.zone())
     if (from > to) return invalid('from is after to')
     const by = args.groupBy ?? 'week'
     const span = (dateOf(to).getTime() - dateOf(from).getTime()) / 86_400_000
@@ -194,7 +196,7 @@ export const readMuscleBalance = defineTool({
     'Which muscles were trained over a date range (default the last 7 days, today included): completed work sets per muscle, where the exercise\'s target muscle counts 1 per set and each secondary muscle 0.4, ranked, with a level 1–4 relative to the most trained muscle, and the main muscles not trained at all. Based on the exercise dataset\'s muscles, so it can differ from the app\'s own muscle map.',
   input: { from: isoDate.optional(), to: isoDate.optional() },
   async handler(args, ctx) {
-    const { from, to } = range(args, 7)
+    const { from, to } = range(args, 7, ctx.now(), args.to ? undefined : await ctx.store.zone())
     if (from > to) return invalid('from is after to')
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)

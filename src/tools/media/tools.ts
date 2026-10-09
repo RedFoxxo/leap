@@ -244,7 +244,7 @@ export const writeDownloadMedia = defineTool({
 export const deleteMediaSweep = defineTool({
   name: 'delete_media_sweep',
   description:
-    'Delete at once every stored photo and video of the profile that nothing references any more, instead of waiting for the grace period. At most 10 times an hour.',
+    'Delete at once every stored photo and video of the profile that nothing references any more, instead of waiting for the grace period. openGym judges by the profile as stored on the server: a file attached on another device whose change has not synced yet counts as unreferenced and is deleted from the server too. At most 10 times an hour.',
   input: {},
   async handler(_args, ctx: ToolContext) {
     const r = await ctx.http.request<{ removed?: number; freedBytes?: number; usage?: Parameters<typeof usageOf>[0] }>({ method: 'POST', path: '/api/media/sweep', json: {} })

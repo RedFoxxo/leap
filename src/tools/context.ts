@@ -31,7 +31,7 @@ export interface ContextOptions {
   backup?: BackupWriter | null
   /** Clock for write stamps (tests). */
   now?: () => number
-  /** Override the built-in exercise catalogue (tests). Defaults to the cached upstream dataset, loaded in the background. */
+  /** Override the built-in exercise catalogue (tests). Defaults to the shipped data/exercises.json, read on first use. */
   builtinExercises?: () => Promise<BuiltinCatalog>
 }
 

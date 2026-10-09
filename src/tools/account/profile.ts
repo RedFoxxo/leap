@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { addDays, localDateTime, today, WEEKDAYS, weekdayOf } from '../../domain/dates.js'
+import { addDays, localDateTime, today, WEEKDAYS, weekdayOf, zoneOf } from '../../domain/dates.js'
 import { planFor, routineName } from '../../domain/plan.js'
-import { dayNoteOf, queueView, scheduleModeOf, type QueueView } from '../../domain/queue.js'
+import { dayNoteOf, queueOf, queueView, roundOut, scheduleModeOf } from '../../domain/queue.js'
 import { listOf, unitOf, type State } from '../../state/types.js'
 import { failure, success } from '../respond.js'
 import { defineTool } from '../types.js'
@@ -55,14 +55,18 @@ export const readProfile = defineTool({
     if (!me.data?.user || typeof me.data.user.id !== 'string') return failure('openGym answered without a profile; check OPENGYM_URL points at openGym')
     const { state, rev } = snapshot.data
     const workouts = listOf(state, 'workouts')
-    const day = today(ctx.now())
+    const zone = zoneOf(state)
+    const day = today(ctx.now(), zone)
     const since = (days: number) => workouts.filter((w) => String(w.d) > addDays(day, -days) && String(w.d) <= day).length
     const named = (ids: string[]) => ids.map((id) => ({ id, name: routineName(state, id) }))
     const todayPlan = planFor(state, day, day)
-    const rotation = queueView(state, day)
-    // Like Home: the next training day (one with a routine that has exercises), but not while the app's own rotation is in charge.
+    const round = queueView(state, day)
+    // Like Home: the next training day (one with a routine that has exercises), but not in rotation mode
+    // unless a planner's queue runs it (Home.jsx: the loop has no weekdays to name).
+    const plannerQueue = !!queueOf(state) && !queueOf(state)?.rotationId
+    const showNext = scheduleModeOf(state) !== 'rotation' || plannerQueue
     let next: { date: string; weekday: string; routines: { id: string; name: string }[] } | undefined
-    for (let i = 1; i <= 7 && !next && rotation?.managedBy !== 'app'; i++) {
+    for (let i = 1; i <= 7 && !next && showNext; i++) {
       const date = addDays(day, i)
       const plan = planFor(state, date, day)
       const trainable = plan.routineIds.some((id) => listOf(listOf(state, 'routines').find((r) => r.id === id), 'ex').length > 0)
@@ -89,34 +93,21 @@ export const readProfile = defineTool({
       today: {
         date: day,
         weekday: WEEKDAYS[weekdayOf(day)],
-        ...(todayPlan.routineIds.length ? { planned: named(todayPlan.routineIds), plannedBy: todayPlan.plannedBy } : { rest: true }),
-        done: workouts.filter((w) => w.d === day).map((w) => ({ id: w.id, name: w.name })),
+        ...(todayPlan.routineIds.length ? { routines: named(todayPlan.routineIds) } : { rest: true }),
+        plannedBy: todayPlan.plannedBy,
+        workouts: workouts.filter((w) => w.d === day).map((w) => ({ id: w.id, name: w.name })),
         ...(note ? { note } : {}),
       },
       schedule: scheduleModeOf(state),
-      ...(rotation ? { rotation: roundOf(rotation) } : {}),
+      ...(round ? { round: roundOut(round) } : {}),
       ...(next ? { nextTraining: next } : {}),
       ...(latest ? { bodyWeight: { date: latest.d, weight: latest.w } } : {}),
       ...(typeof state?.targetW === 'number' ? { goalWeight: state.targetW } : {}),
       revision: rev,
-      ...(localDateTime(state?._ts) ? { lastChanged: localDateTime(state?._ts) } : {}),
+      ...(localDateTime(state?._ts, zone) ? { lastChanged: localDateTime(state?._ts, zone) } : {}),
     })
   },
 })
-
-/** A round of the rotation (or a planner's week) in brief. */
-export function roundOf(v: QueueView) {
-  const next = v.sessions.find((s) => s.state === 'next')
-  return {
-    managedBy: v.managedBy,
-    ...(v.label ? { label: v.label } : {}),
-    done: v.done,
-    total: v.total,
-    ...(v.complete ? { complete: true } : {}),
-    ...(v.waiting ? { startsOn: v.startsOn } : {}),
-    ...(next ? { next: { id: next.id, name: next.name } } : {}),
-  }
-}
 
 function settingsOf(state: State | null): Record<string, unknown> {
   return Object.fromEntries(Object.entries(state ?? {}).filter(([k]) => !DATA_KEYS.has(k)))
@@ -157,7 +148,7 @@ export const readDocument = defineTool({
           .sort((a, b) => a.key.localeCompare(b.key)),
       })
     }
-    if (!(args.key in state)) return failure(`The profile has no "${args.key}"; list the keys with read_document without a key`)
+    if (!Object.hasOwn(state, args.key)) return failure(`The profile has no "${args.key}"; list the keys with read_document without a key`)
     const value = state[args.key]
     const chars = JSON.stringify(value)?.length ?? 0
     if (chars > MAX_CHARS) return failure(`"${args.key}" is ${chars} characters, above the ${MAX_CHARS} limit; use the dedicated read tools`)

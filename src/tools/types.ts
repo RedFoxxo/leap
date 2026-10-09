@@ -13,6 +13,8 @@ export interface ToolDef<S extends z.ZodRawShape = z.ZodRawShape> {
   name: string
   description: string
   input: S
+  /** An admin_ tool that only reads (annotated read-only for MCP clients; its tier stays admin). */
+  readOnly?: boolean
   handler: (args: z.output<z.ZodObject<S>>, ctx: ToolContext, call: ToolCall) => Promise<ToolOutput>
 }
 

@@ -20,8 +20,8 @@ export function createServer(ctx: ToolContext, tools: AnyToolDef[] = allTools())
         description: tool.description,
         inputSchema: tool.input,
         annotations: {
-          readOnlyHint: tier === 'read',
-          destructiveHint: tier !== 'read',
+          readOnlyHint: tier === 'read' || tool.readOnly === true,
+          destructiveHint: tier !== 'read' && tool.readOnly !== true,
           openWorldHint: true,
         },
       },

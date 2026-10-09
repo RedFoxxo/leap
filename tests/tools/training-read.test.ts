@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { profile, PULL, PUSH, LEGS } from '../fixtures/profile.js'
 import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { harness } from '../helpers/harness.js'
@@ -7,6 +7,8 @@ async function setup(state: Record<string, unknown> | null = profile()) {
   const fake = new FakeOpenGym(state)
   return { fake, h: await harness({ stub: fake.stub }) }
 }
+
+afterEach(() => vi.useRealTimers())
 
 describe('read_workouts', () => {
   it('lists newest first with names, set counts, volume and PRs', async () => {
@@ -132,7 +134,6 @@ describe('read_routines and read_routine', () => {
     expect(push.json.exercises[1]).toMatchObject({ exerciseId: '0294', repsMin: 10, repsMax: 12, superset: 'sg1', perSide: true })
     expect(push.json).not.toHaveProperty('ex')
     expect((await h.call('read_routine', { id: 'nope' })).isError).toBe(true)
-    vi.useRealTimers()
     await h.close()
   })
 })
@@ -170,7 +171,7 @@ describe('read_bodyweight', () => {
     expect(r.json).toEqual({
       unit: 'kg',
       latest: { date: '2026-10-05', weight: 78.4 },
-      goal: 77,
+      goalWeight: 77,
       toGoal: -1.4,
       change7d: -0.6,
       change30d: -2.8,

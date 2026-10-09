@@ -45,7 +45,28 @@ leap refuses to write to an older server; use leap 1.0.0 with openGym 1.3.9.
   Bengali and Traditional Chinese, …) in `write_settings`.
 - **Coach and admin**: the Coach's "not set up" code; admin Coach output limit
   and routing headers.
-- Write tools take "today" from the same clock as their stamps.
+- **Output fields renamed** for one vocabulary across tools: a round is
+  `round` everywhere (`read_week_plan`, `read_profile`, `write_log_workout`;
+  the saved loop in `read_week_plan` is `rotation`); `read_profile`'s today
+  lists `routines` and `workouts`; `read_bodyweight` says `goalWeight`; a
+  dumbbell meaning is `weightMeans` with `each`/`total` (history and records
+  too); an unchanged write's text is `message`.
+- **Round trips**: what `read_workout` and `read_routine` return can be written
+  back unchanged: per-side drop sets and rest-pause, dumbbell meanings, values
+  the app stores and workouts from before ids (`YYYY-MM-DD|start`) are kept.
+- **Fixes**: `write_schedule_mode` no longer restarts a running round or takes
+  over a planner's queue; editing a custom exercise stored without primary
+  muscles no longer wipes its muscles; `admin_user` lists the newest workouts;
+  `write_document` refuses keys `write_settings` checks; `admin_coach_config`
+  needs `confirm` before a filed key is sent to another host; a write whose
+  answer was lost or garbled is not repeated or reported as failed; workouts
+  that end in the future are refused; best weight and warm-ups follow the app.
+- Workout times and "today" come from the wall clock, stamps from the stamp
+  clock, and are read in the user's time zone (the one the app files with the
+  reminder, as openGym's server does), else the machine's: leap in a UTC
+  container no longer shifts days and times.
+- `write_routine` can add an exercise to a stored superset by naming only that
+  exercise.
 - Verified end to end against a live openGym server (API 1.4.0).
 
 ## 1.0.0 — 2026-10-07

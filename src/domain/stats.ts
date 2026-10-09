@@ -12,6 +12,7 @@ import {
   setMode,
   setsOf,
   sidesOf,
+  targetOf,
 } from './sets.js'
 
 /**
@@ -109,8 +110,9 @@ export interface BestSet {
 export function bestSet(entry: Entry, formula: Formula = 'epley', assisted = false): BestSet | null {
   if (assisted) return null
   let best: BestSet | null = null
+  const target = targetOf(entry)
   for (const s of setsOf(entry)) {
-    if (isWarmup(s) || setMode(s) !== 'reps' || !hasCompletedWork(s)) continue
+    if (isWarmup(s) || setMode(s, target) !== 'reps' || !hasCompletedWork(s)) continue
     const sides = sidesOf(s)
     for (const row of sides ? [sides.L, sides.R].filter((x) => x.done === true) : [s]) {
       const estimate = estimate1RM(row.w, row.r, formula, row.rir ?? null)
@@ -135,8 +137,8 @@ export interface Session {
   estimateRecord: boolean
 }
 
-function setLabel(s: Entry): string {
-  const mode = setMode(s)
+function setLabel(s: Entry, target: Entry): string {
+  const mode = setMode(s, target)
   if (mode === 'time') return `${Number(s.sec) || 0}s${Number(s.w) ? ` @${Number(s.w)}` : ''}`
   if (mode === 'cardio') return `${Number(s.min) || 0}min${s.speed != null ? ` @${Number(s.speed)}km/h` : ''}`
   const sides = sidesOf(s)
@@ -168,8 +170,7 @@ export function exerciseSessions(state: State | null, exerciseId: string, exerci
       .filter((e) => e.id === exerciseId)
       .map((e) => entryAs(e, as, name))
     if (!entries.length) continue
-    const work = entries.flatMap((e) => setsOf(e).filter((s) => !isWarmup(s)))
-    const done = work.filter(hasCompletedWork)
+    const done = entries.flatMap((e) => setsOf(e).filter((s) => !isWarmup(s) && hasCompletedWork(s)).map((s) => ({ s, target: targetOf(e) })))
     if (!done.length) continue
     const weight = entries.reduce((best, e) => {
       const b = bestWeight(e, assisted)
@@ -184,9 +185,9 @@ export function exerciseSessions(state: State | null, exerciseId: string, exerci
       workoutId: String(w.id),
       date: String(w.d),
       ...(typeof w.name === 'string' ? { name: w.name } : {}),
-      sets: done.map(setLabel),
-      workSets: done.reduce((n, s) => n + doneUnits(s), 0),
-      reps: done.reduce((n, s) => n + completedReps(s), 0),
+      sets: done.map(({ s, target }) => setLabel(s, target)),
+      workSets: done.reduce((n, { s }) => n + doneUnits(s), 0),
+      reps: done.reduce((n, { s }) => n + completedReps(s), 0),
       volume: Math.round(entries.reduce((v, e) => v + entryVolume(e, name), 0) * 100) / 100,
       bestWeight: weight,
       best1RM,

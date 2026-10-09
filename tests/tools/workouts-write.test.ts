@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LEGS, profile, PUSH } from '../fixtures/profile.js'
+import { instantAt, today } from '../../src/domain/dates.js'
+import { appValuesWorkout, LEGS, profile, PUSH } from '../fixtures/profile.js'
 import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { harness } from '../helpers/harness.js'
 
@@ -8,9 +9,9 @@ const NOW = new Date('2026-10-07T08:00:00').getTime()
 beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }))
 afterEach(() => vi.useRealTimers())
 
-async function setup(state: Record<string, unknown> = profile()) {
+async function setup(state: Record<string, unknown> = profile(), now = NOW) {
   const fake = new FakeOpenGym(state, 40)
-  const h = await harness({ stub: fake.stub, context: { now: () => NOW } })
+  const h = await harness({ stub: fake.stub, context: { now: () => now } })
   const doc = () => fake.state as Record<string, any>
   const workout = (id: string) => doc().workouts.find((w: { id: string }) => w.id === id)
   return { fake, h, doc, workout }
@@ -200,7 +201,7 @@ describe('write_log_workout', () => {
     const bad = [
       { entries: [{ exerciseId: '0043', sets: [{ weight: 100 }] }] },
       { entries: [{ exerciseId: '0043', sets: [{ left: { reps: 5 } }] }] },
-      { entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5, rir: 1, rpe: 9 }] }] },
+      { entries: [{ exerciseId: '0043', sets: [{ left: { weight: 10, reps: 3, clusters: [{ reps: 2 }, { reps: 2 }] }, right: { weight: 10, reps: 5 } }] }] },
       { entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5, drops: [{ weight: 80, reps: 5 }], clusters: [{ reps: 2 }] }] }] },
       { entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 3, clusters: [{ reps: 2 }, { reps: 2 }] }] }] },
       { entries: [{ exerciseId: '0043', sets: [{ sec: 30, reps: 5 }] }] },
@@ -377,12 +378,50 @@ describe('workout input the app would not store', () => {
     const cases: [Record<string, unknown>, RegExp][] = [
       [{ date: '2026-10-08', ...one([{ weight: 1, reps: 1 }]) }, /in the future/],
       [one([{ weight: 100, reps: 5, done: false }]), /no completed set/],
-      [one([{ left: { weight: 10, reps: 5 }, right: { weight: 10, reps: 5 }, drops: [{ weight: 5, reps: 5 }] }]), /not logged on per-side sets/],
+      [one([{ left: { weight: 10, reps: 5 }, right: { weight: 10, reps: 5 }, drops: [{ weight: 5, reps: 5 }] }]), /drops and clusters per side/],
+      [one([{ left: { weight: 10, reps: 5 }, right: { weight: 10, reps: 5 }, rir: 1 }]), /rir and rpe per side/],
+      [one([{ min: 20, weight: 5 }]), /cardio set takes min and speed/],
+      [one([{ min: 20, rpe: 7 }]), /cardio set takes min and speed/],
+      [one([{ speed: 6, incline: 4 }]), /incline needs min/],
+      [one([{ min: 20, max: true }]), /cardio set is not a Max set/],
+      [one([{ sec: 30, drops: [{ weight: 5, reps: 5 }] }]), /drop sets and rest-pause are for reps sets/],
+      [one([{ min: 20, clusters: [{ reps: 2 }] }]), /drop sets and rest-pause are for reps sets/],
+      [{ date: '2026-10-07', start: '07:30', ...one([{ weight: 1, reps: 1 }]) }, /ends in the future/],
       [{ note: 'x'.repeat(501), ...one([{ weight: 1, reps: 1 }]) }, /./],
     ]
     for (const [args, message] of cases) expect((await h.call('write_log_workout', args)).text, JSON.stringify(args).slice(0, 80)).toMatch(message)
     expect((await h.call('write_update_workout', { id: 'w-push', date: '2026-12-01' })).text).toMatch(/in the future/)
-    expect(fake.stub.calls).toHaveLength(0)
+    // Only the profile's time zone is read (to tell what today is); nothing else is sent.
+    expect(fake.stub.calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /api/data'])
+    await h.close()
+  })
+
+  it('takes today and times in the profile’s time zone, not the machine’s', async () => {
+    const machine = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const { h, doc } = await setup()
+      // NOW is 08:00 in Warsaw, the profile's zone, and still the evening before in Los Angeles.
+      const r = await h.call('write_log_workout', { start: '07:00', durationMin: 45, entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5 }] }] })
+      expect(r.isError, r.text).toBe(false)
+      const logged = (doc().workouts as { d: string; start: number }[]).find((w) => w.start === instantAt(w.d, '07:00', 'Europe/Warsaw'))
+      expect(logged?.d).toBe(today(NOW, 'Europe/Warsaw'))
+      expect((await h.call('read_workout', { id: r.json.logged.id })).json.start).toBe(`${today(NOW, 'Europe/Warsaw')}T07:00`)
+      await h.close()
+    } finally {
+      if (machine === undefined) delete process.env.TZ
+      else process.env.TZ = machine
+    }
+  })
+
+  it('refuses an edit that makes a workout end in the future, as the app’s date and duration rows do', async () => {
+    const { h, fake } = await setup()
+    // w-push starts at 18:00: on today it would end tonight.
+    expect((await h.call('write_update_workout', { id: 'w-push', date: '2026-10-07' })).text).toMatch(/ends in the future/)
+    expect((await h.call('write_update_workout', { id: 'w-push', date: '2026-10-07', start: '07:00', durationMin: 90 })).text).toMatch(/ends in the future/)
+    expect(fake.puts).toHaveLength(0)
+    const ok = await h.call('write_update_workout', { id: 'w-push', date: '2026-10-07', start: '06:30', durationMin: 90 })
+    expect(ok.isError, ok.text).toBe(false)
     await h.close()
   })
 
@@ -392,6 +431,141 @@ describe('workout input the app would not store', () => {
     const { h } = await setup(state)
     const r = await h.call('write_log_workout', { date: '2026-10-06', routineIds: [PUSH, LEGS, 'r-pull', 'r4'], entries: [{ exerciseId: '0043', sets: [{ weight: 1, reps: 1 }] }] })
     expect(r.json.logged.name).toBe('Push Day + Leg Day + 2 more')
+    await h.close()
+  })
+})
+
+describe('read_workout output written back', () => {
+  it('keeps per-side drop sets and rest-pause, and every value the app stores, unchanged', async () => {
+    const state = profile()
+    ;(state.workouts as unknown[]).push(appValuesWorkout())
+    const { h, fake } = await setup(state)
+    const read = await h.call('read_workout', { id: 'w-app' })
+    expect(read.json.entries[0].sets[0]).toEqual({
+      left: { weight: 14, reps: 10, done: true, rir: 1, drops: [{ weight: 10, reps: 6 }] },
+      right: { weight: 14, reps: 10, done: true, rir: 2, drops: [{ weight: 10, reps: 5 }] },
+    })
+    expect(read.json.entries[0].sets[1].right).toEqual({ weight: 12, reps: 12, done: true, clusters: [{ reps: 2, restSec: 0 }], other: { weightOrigin: 'manual' } })
+    const r = await h.call('write_update_workout', { id: 'w-app', entries: read.json.entries })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.json).toMatchObject({ unchanged: true })
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('stores a per-side drop set on its sides, the row mirroring their type, as the app does', async () => {
+    const state = profile()
+    ;(state.workouts as unknown[]).push(appValuesWorkout())
+    const { h, workout } = await setup(state)
+    const read = await h.call('read_workout', { id: 'w-app' })
+    read.json.entries[0].sets[0].right.drops[0].reps = 7
+    const r = await h.call('write_update_workout', { id: 'w-app', entries: read.json.entries })
+    expect(r.isError, r.text).toBe(false)
+    const row = workout('w-app').entries[0].sets[0]
+    expect(row).toEqual({
+      w: 14, r: 20, done: true, rir: 1, type: 'dropset',
+      sides: { L: { w: 14, r: 10, done: true, rir: 1, type: 'dropset', drops: [{ w: 10, r: 6 }] }, R: { w: 14, r: 10, done: true, rir: 2, type: 'dropset', drops: [{ w: 10, r: 7 }] } },
+    })
+    expect(workout('w-app').vol).toBe(1158 + 20)
+    await h.close()
+  })
+
+  it('takes back an entry logged per dumbbell, with its weightMeans', async () => {
+    const state = profile()
+    ;(state as any).dbLoad = { '0294': { mode: 'each', _ts: 1 } }
+    const { h, fake, doc } = await setup(state)
+    await h.call('write_log_workout', { date: '2026-10-06', entries: [{ exerciseId: '0294', sets: [{ weight: 20, reps: 10 }] }] })
+    const id = doc().workouts.find((w: { d: string }) => w.d === '2026-10-06').id
+    const read = await h.call('read_workout', { id })
+    expect(read.json.entries[0].weightMeans).toBe('each')
+    const puts = fake.puts.length
+    const r = await h.call('write_update_workout', { id, entries: read.json.entries })
+    expect(r.json, r.text).toMatchObject({ unchanged: true })
+    expect(fake.puts).toHaveLength(puts)
+    await h.close()
+  })
+
+  it('reports an unchanged workout whose stored volume is off, without writing', async () => {
+    const state = profile()
+    ;(state.workouts as any[])[1].vol = 1500
+    const { h, fake } = await setup(state)
+    const read = await h.call('read_workout', { id: 'w-push' })
+    const r = await h.call('write_update_workout', { id: 'w-push', entries: read.json.entries })
+    expect(r.json, r.text).toMatchObject({ unchanged: true })
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+})
+
+describe('the clock', () => {
+  it('times and judges a workout by the wall clock, not by a stamp from a device ahead of it', async () => {
+    const state = profile()
+    state._ts = NOW + 2 * 86_400_000
+    const { h, doc } = await setup(state)
+    const r = await h.call('write_log_workout', { entries: [{ exerciseId: '0043', sets: [{ weight: 120, reps: 5 }] }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().workouts.at(-1)).toMatchObject({ d: '2026-10-07', start: NOW - 3_600_000, end: NOW })
+    expect(r.json.rememberedWeightRaised).toEqual(['barbell full squat'])
+    await h.close()
+  })
+
+  it('starts a workout logged just after midnight on that day', async () => {
+    const now = new Date('2026-10-07T00:20:00').getTime()
+    vi.setSystemTime(now)
+    const { h, doc } = await setup(profile(), now)
+    const r = await h.call('write_log_workout', { entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5 }] }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().workouts.at(-1)).toMatchObject({ d: '2026-10-07', start: new Date('2026-10-07T00:00:00').getTime(), end: now })
+    await h.close()
+  })
+})
+
+describe('moving a workout', () => {
+  it('keeps its length, never inventing an hour for a workout with no end', async () => {
+    const state = profile()
+    delete (state.workouts as any[])[1].end
+    const { h, workout } = await setup(state)
+    await h.call('write_update_workout', { id: 'w-push', date: '2026-10-01' })
+    const w = workout('w-push')
+    expect(w.start).toBe(new Date('2026-10-01T18:00:00').getTime())
+    expect(w.end).toBe(w.start)
+    await h.close()
+  })
+})
+
+describe('workouts from before ids', () => {
+  const legacy = () => {
+    const state = profile()
+    const w = (state.workouts as any[])[0]
+    delete w.id
+    return { state, key: `2026-09-30|${w.start}` }
+  }
+
+  it('are read, edited and deleted by their day and start, and an edit freezes that key as the id', async () => {
+    const { state, key } = legacy()
+    const { h, doc } = await setup(state)
+    expect((await h.call('read_workouts')).json.workouts[1].id).toBe(key)
+    const read = await h.call('read_workout', { id: key })
+    expect(read.isError, read.text).toBe(false)
+    expect(read.json.id).toBe(key)
+    const r = await h.call('write_update_workout', { id: key, name: 'Legs' })
+    expect(r.isError, r.text).toBe(false)
+    expect(doc().workouts[0]).toMatchObject({ id: key, name: 'Legs' })
+    // The frozen id keeps working.
+    expect((await h.call('write_update_workout', { id: key, name: 'Legs again' })).isError).toBe(false)
+    const del = await h.call('delete_workout', { id: key })
+    expect(del.isError, del.text).toBe(false)
+    expect(doc().workouts.map((w: { id: string }) => w.id)).toEqual(['w-push'])
+    await h.close()
+  })
+
+  it('are deleted by their key without an edit first', async () => {
+    const { state, key } = legacy()
+    const { h, doc } = await setup(state)
+    const del = await h.call('delete_workout', { id: key })
+    expect(del.isError, del.text).toBe(false)
+    expect(doc().workouts).toHaveLength(1)
+    expect((await h.call('delete_workout', { id: 'not|an-id' })).isError).toBe(true)
     await h.close()
   })
 })

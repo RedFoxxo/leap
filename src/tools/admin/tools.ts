@@ -22,6 +22,7 @@ function adminFailure(summary: string, e: Err) {
 
 export const adminUsers = defineTool({
   name: 'admin_users',
+  readOnly: true,
   description:
     `Admin: every profile on the instance: id, name, created, admin and disabled flags, who invited it, number of workouts and the last one, last sync, whether it has a password, an e-mail and push, and whether a workout is live now. ${DATA_NOTE}`,
   input: {},
@@ -42,12 +43,14 @@ interface AdminUserExport {
 
 export const adminUser = defineTool({
   name: 'admin_user',
+  readOnly: true,
   description:
     `Admin: one profile in detail: its account record, unit, last sync, how many workouts, routines and weigh-ins it has, the latest weigh-in, and its most recent workouts (default 10, newest first). openGym answers with the whole profile; leap summarises it. ${DATA_NOTE}`,
   input: { id: userId, workouts: z.number().int().min(0).max(200).optional().describe('How many recent workouts (default 10)') },
   async handler(args, ctx) {
     const r = await ctx.http.request<AdminUserExport>({ method: 'GET', path: '/api/admin/user', query: { id: args.id } })
     if (!r.ok) return adminFailure('Could not read the user', r)
+    // Newest first, as openGym sends them (api/server.js GET /api/admin/user, v1.4.0).
     const workouts = Array.isArray(r.data?.workouts) ? r.data.workouts : []
     const weighIns = (Array.isArray(r.data?.bodyweight) ? r.data.bodyweight : []).filter((e) => typeof e?.d === 'string').sort((a, b) => String(a.d).localeCompare(String(b.d)))
     const max = args.workouts ?? 10
@@ -59,8 +62,7 @@ export const adminUser = defineTool({
       counts: { workouts: workouts.length, routines: Array.isArray(r.data?.routines) ? r.data.routines.length : 0, weighIns: weighIns.length },
       ...(latest ? { latestWeighIn: { date: latest.d, weight: latest.w } } : {}),
       recentWorkouts: workouts
-        .slice(-max)
-        .reverse()
+        .slice(0, max)
         .map((w) => ({ id: w.id, date: w.d, name: w.name, volume: w.vol, exercises: Array.isArray(w.entries) ? w.entries.length : 0 })),
       ...(workouts.length > max ? { truncated: true } : {}),
     })
@@ -113,6 +115,7 @@ export const adminPasswordReset = defineTool({
 
 export const adminInvites = defineTool({
   name: 'admin_invites',
+  readOnly: true,
   description: 'Admin: invite codes (for invite-only instances): unused and used, with their notes.',
   input: {},
   async handler(_args, ctx) {
@@ -143,6 +146,7 @@ export const adminRevokeInvite = defineTool({
 
 export const adminAudit = defineTool({
   name: 'admin_audit',
+  readOnly: true,
   description: `Admin: the activity log, newest first: sign-ins, failed attempts and admin actions. Filter by category; page with \`before\` (nextBefore of the previous page). ${DATA_NOTE}`,
   input: {
     category: z.enum(['auth', 'admin', 'fail']).optional(),
@@ -167,6 +171,7 @@ export const adminClearAudit = defineTool({
 
 export const adminCoach = defineTool({
   name: 'admin_coach',
+  readOnly: true,
   description: "Admin: the AI Coach card: on or off, provider, model and endpoint, whether a credential is filed (never the credential), caps and today's usage, and a live check of the provider.",
   input: {},
   async handler(_args, ctx) {
@@ -175,15 +180,29 @@ export const adminCoach = defineTool({
   },
 })
 
+interface CoachCard {
+  provider?: string
+  providers?: { id?: string; connected?: boolean }[]
+  auth?: { state?: string }
+  caps?: { perProfileDaily?: number; instanceDaily?: number }
+}
+
+/** Whether openGym holds a credential for `provider` (api/coach/routes.js GET /api/admin/coach, v1.4.0). */
+function keyFiled(card: CoachCard | undefined, provider: string): boolean {
+  if ((Array.isArray(card?.providers) ? card.providers : []).some((p) => p?.id === provider && p.connected === true)) return true
+  return card?.provider === provider && card.auth?.state === 'connected'
+}
+
 export const adminCoachConfig = defineTool({
   name: 'admin_coach_config',
   description:
-    'Admin: change the AI Coach settings; only what is given changes. Provider ids are listed by admin_coach. Filing the provider credential is done in the app, so no secret passes through this conversation.',
+    "Admin: change the AI Coach settings; only what is given changes. Provider ids are listed by admin_coach. Filing the provider credential is done in the app, so no secret passes through this conversation. Coach jobs send the provider's stored key to its endpoint: when a key is filed, changing the endpoint (baseUrl) or switching to a provider that holds one needs confirm: true, since the stored key is sent to that host from then on.",
   input: {
     enabled: z.boolean().optional(),
     provider: z.string().min(1).max(40).optional(),
     model: z.string().max(80).optional().describe('Empty clears it'),
-    baseUrl: z.string().max(2048).optional().describe('Only for providers with a configurable endpoint; empty = default'),
+    baseUrl: z.string().max(2048).optional().describe('Only for providers with a configurable endpoint; empty = default. The stored key is sent to this host'),
+    confirm: z.literal(true).optional().describe('Needed to change the endpoint, or the provider, while a key is filed for it'),
     community: z.boolean().optional().describe('Offer the comparison with others'),
     caps: z
       .object({ perProfileDaily: z.number().int().min(0).max(200).optional(), instanceDaily: z.number().int().min(0).max(5000).optional() })
@@ -204,14 +223,23 @@ export const adminCoachConfig = defineTool({
       .filter(([n, v]) => /auth|key|token|secret|cookie|password/i.test(n) || /^(bearer|basic)\s|^(sk|pk|rk)-|^gh[pousr]_|^xox[abp]-/i.test(v))
       .map(([n]) => n)
     if (secretLike.length) return invalid(`${secretLike.join(', ')} looks like a credential; credentials are filed in the app, never through leap`)
-    const { outputLimit, ...rest } = args
+    const { outputLimit, confirm, ...rest } = args
     const body: Record<string, unknown> = Object.fromEntries(Object.entries({ ...rest, ...(outputLimit !== undefined ? { maxOutputTokens: outputLimit } : {}) }).filter(([, v]) => v !== undefined))
     if (!Object.keys(body).length) return invalid('nothing to change')
-    if (args.caps) {
+    if (args.caps || args.baseUrl !== undefined || args.provider !== undefined) {
+      const card = await ctx.http.request<CoachCard>({ method: 'GET', path: '/api/admin/coach' })
+      if (!card.ok) return adminFailure('Could not read the current Coach settings', card)
+      const current = card.data?.provider
+      const target = args.provider ?? current ?? ''
+      // A key filed for the provider goes wherever its endpoint points: a new endpoint, or a switch to
+      // a provider whose endpoint was set earlier, sends it to another host.
+      const moves = args.baseUrl !== undefined || (args.provider !== undefined && args.provider !== current)
+      if (moves && !confirm && keyFiled(card.data, target)) {
+        const where = args.baseUrl !== undefined ? `"${args.baseUrl || 'the default endpoint'}"` : `${target}'s endpoint`
+        return invalid(`a key is filed for ${target}; with this change Coach jobs send that stored key to ${where}. Check that you trust that endpoint, then call again with confirm: true`)
+      }
       // openGym rebuilds both limits from what is sent and turns a missing one into 0, "no limit".
-      const card = await ctx.http.request<{ caps?: { perProfileDaily?: number; instanceDaily?: number } }>({ method: 'GET', path: '/api/admin/coach' })
-      if (!card.ok) return adminFailure('Could not read the current Coach limits', card)
-      body.caps = { perProfileDaily: card.data?.caps?.perProfileDaily ?? 0, instanceDaily: card.data?.caps?.instanceDaily ?? 0, ...args.caps }
+      if (args.caps) body.caps = { perProfileDaily: card.data?.caps?.perProfileDaily ?? 0, instanceDaily: card.data?.caps?.instanceDaily ?? 0, ...args.caps }
     }
     const r = await ctx.http.request({ method: 'POST', path: '/api/admin/coach/config', json: body })
     return r.ok ? success({ changed: body }) : adminFailure('Could not change the Coach settings', r)

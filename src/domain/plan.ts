@@ -10,8 +10,6 @@ export function weekdayRoutineIds(state: State | null, weekday: number): string[
 
 export interface DayPlan {
   routineIds: string[]
-  /** `rest` or `routine` when `dayPlan` overrides the plan for this date (a pin is not an override). */
-  override?: 'rest' | 'routine'
   /** What decided it: a date override, a pinned session, the rotation or a planner's queue, the weekday, or nothing (rest). */
   plannedBy: PlannedBy
 }
@@ -24,9 +22,7 @@ export interface DayPlan {
  * longer exist are ignored, as the app ignores them.
  */
 export function planFor(state: State | null, iso: string, today: string): DayPlan {
-  const p = effectivePlan(state, iso, today)
-  const override = p.plannedBy === 'rest-override' ? 'rest' : p.plannedBy === 'override' ? 'routine' : undefined
-  return { routineIds: p.routineIds, plannedBy: p.plannedBy, ...(override ? { override } : {}) }
+  return effectivePlan(state, iso, today)
 }
 
 export function routineById(state: State | null, id: string): Entry | undefined {

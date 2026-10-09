@@ -38,9 +38,12 @@ export const writePasskeyName = defineTool({
   description: 'Name one of the profile\'s passkeys ("Work laptop"); ids from read_account. An empty name removes it.',
   input: { id: z.string().min(1).max(512), name: z.string().max(40) },
   async handler(args, ctx) {
-    const r = await ctx.http.request({ method: 'POST', path: '/api/account/passkeys/rename', json: { id: args.id, name: args.name.trim() } })
+    const r = await ctx.http.request<{ passkeys?: { id?: unknown; name?: unknown }[] }>({ method: 'POST', path: '/api/account/passkeys/rename', json: { id: args.id, name: args.name.trim() } })
     if (!r.ok) return failure(r.status === 404 ? 'No passkey of this profile has that id' : 'Could not rename the passkey', r)
-    return success({ renamed: args.id, name: args.name.trim() || null })
+    // openGym cleans the name (control characters, runs of spaces) and answers with the passkey list.
+    const stored = (Array.isArray(r.data?.passkeys) ? r.data.passkeys : []).find((p) => p?.id === args.id)
+    const name = stored ? (typeof stored.name === 'string' && stored.name ? stored.name : null) : args.name.trim() || null
+    return success({ renamed: args.id, name })
   },
 })
 

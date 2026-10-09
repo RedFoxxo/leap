@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ASSISTED_IDS, BuiltinCatalogProvider, customExercises, ExerciseIndex, isAssisted } from '../src/catalog/exercises.js'
+import { BODY_PARTS, EQUIPMENT } from '../src/tools/exercises/write.js'
 import { OPENGYM } from '../src/version.js'
 import { fixtureCatalog } from './fixtures/exercises.js'
 
@@ -38,6 +39,17 @@ describe('BuiltinCatalogProvider', () => {
     expect(c.exercises.get('0739')?.name).toBe('sled 45° leg press')
     // The offline list of assistance machines is exactly what the catalogue says.
     expect(new Set([...c.exercises.values()].filter(isAssisted).map((e) => e.id))).toEqual(ASSISTED_IDS)
+  })
+
+  it('has no body part or equipment that write_custom_exercise would refuse', async () => {
+    const c = await new BuiltinCatalogProvider().get()
+    const all = [...c.exercises.values()]
+    const bodyParts = new Set(all.map((e) => e.bodyPart))
+    const equipment = new Set(all.map((e) => e.equipment))
+    expect(bodyParts.size).toBeGreaterThan(5)
+    expect(equipment.size).toBeGreaterThan(20)
+    expect([...bodyParts].filter((b) => !(BODY_PARTS as readonly unknown[]).includes(b))).toEqual([])
+    expect([...equipment].filter((e) => !(EQUIPMENT as readonly unknown[]).includes(e))).toEqual([])
   })
 
   it('shows ids when the catalogue file is missing or damaged', async () => {

@@ -1,5 +1,6 @@
 import type { HttpCore } from '../http/core.js'
 import { err, ok, type Err, type Result } from '../http/result.js'
+import { zoneOf } from '../domain/dates.js'
 import type { BackupWriter } from './backup.js'
 import { stampChange, stampTime } from './stamps.js'
 import { isRecord, LIST_KEYS, MAP_KEYS, type Snapshot, type State } from './types.js'
@@ -84,6 +85,8 @@ export class StateStore {
   private readonly backup: BackupWriter | undefined
   private readonly now: () => number
   private readonly server: StoreOptions['server']
+  /** The time zone of the profile last read; undefined before the first read, null when it has none. */
+  private seenZone: string | null | undefined
 
   constructor(
     private readonly http: HttpCore,
@@ -101,7 +104,17 @@ export class StateStore {
     if (state !== null && state !== undefined && !isRecord(state)) {
       return err(r.status, 'openGym returned a profile document that is not an object', JSON.stringify(state).slice(0, 200))
     }
+    this.seenZone = zoneOf(state) ?? null
     return ok({ state: (state ?? null) as State | null, rev: typeof r.data?.rev === 'number' ? r.data.rev : 0 }, r.status)
+  }
+
+  /**
+   * The user's time zone (domain/dates.ts zoneOf) for deciding what "today" is before a write reads
+   * the profile: the one of the profile last read, read once if none was. Undefined: the machine's.
+   */
+  async zone(): Promise<string | undefined> {
+    if (this.seenZone === undefined) await this.load()
+    return this.seenZone ?? undefined
   }
 
   async update<R>(mutate: Mutate<R>, options: UpdateOptions<R> = {}): Promise<Result<Written<R>>> {
@@ -114,8 +127,11 @@ export class StateStore {
     let retries = 0
     let backup: string | undefined
     const warnings: string[] = []
-    /** Attempts whose outcome is unknown: they may have landed, possibly after a later read. */
-    const lost: { now: number; result: R }[] = []
+    /**
+     * Attempts whose outcome is unknown: they may have landed, possibly after a later read. Their check
+     * proves a landing only when it fails on the document the attempt was made on (`telling`).
+     */
+    const lost: { now: number; result: R; telling: boolean }[] = []
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const { state: current, rev } = base.data
@@ -152,16 +168,21 @@ export class StateStore {
         }
       }
 
-      const put = await this.http.request<{ ok: boolean; rev: number }>({ method: 'PUT', path: '/api/data', json: payload })
-      if (put.ok) {
+      const put = await this.http.request<{ ok: boolean; rev: number } | null>({ method: 'PUT', path: '/api/data', json: payload })
+      if (put.ok && typeof put.data?.rev === 'number') {
         return ok(await this.readBack(decided.result, put.data.rev, now, retries, backup, warnings, options), put.status)
       }
-      const cannotRead = unreadable(put)
-      if (cannotRead) return cannotRead
+      if (!put.ok) {
+        const cannotRead = unreadable(put)
+        if (cannotRead) return cannotRead
+      }
 
-      // No answer, or a proxy in front of openGym that gave up: the write may still have been saved.
-      const unknown = put.status === 0 || GATEWAY_ERRORS.has(put.status)
-      if (unknown) lost.push({ now, result: decided.result })
+      // No answer, a proxy in front of openGym that gave up, or a success whose answer could not be
+      // read: the write may well have been saved.
+      const status = put.status
+      const unknown = status === 0 || GATEWAY_ERRORS.has(status) || (status >= 200 && status < 300)
+      const telling = options.verify !== undefined && options.verify(current ?? {}, decided.result).length > 0
+      if (unknown) lost.push({ now, result: decided.result, telling })
       if (put.status === 409 || unknown) {
         const fresh = await this.load()
         if (!fresh.ok) {
@@ -170,22 +191,22 @@ export class StateStore {
         }
         // A lost attempt may have landed, even after an earlier re-read. Redoing it would apply the
         // change twice (a second workout), so look for it: its `_ts`, or the change itself.
-        const landed = lost.find((a) => fresh.data.state?._ts === a.now || (options.verify !== undefined && options.verify(fresh.data.state ?? {}, a.result).length === 0))
+        const landed = lost.find((a) => fresh.data.state?._ts === a.now || (a.telling && options.verify!(fresh.data.state ?? {}, a.result).length === 0))
         if (landed) {
           warnings.push('openGym did not confirm the write, but the profile shows it was applied')
           return ok(await this.readBack(landed.result, fresh.data.rev, landed.now, retries, backup, warnings, options, fresh.data), 200)
         }
-        if (unknown) warnings.push(`no confirmation for attempt ${attempt} (${put.message}); the change is not in the profile, so it was retried`)
+        if (unknown) warnings.push(`no confirmation for attempt ${attempt} (${put.ok ? 'an answer without a revision' : put.message}); the change is not in the profile, so it was retried`)
         else retries++
         base = fresh
         continue
       }
 
-      return put
+      return put as Err
     }
 
     if (lost.length === MAX_ATTEMPTS) {
-      return err(0, `openGym did not confirm any of ${MAX_ATTEMPTS} attempts and the change is not in the profile; nothing of it was saved`)
+      return err(0, `openGym did not confirm any of ${MAX_ATTEMPTS} attempts and the change was not in the profile when it was read again; a late one may still land, so read the profile before retrying`)
     }
     return err(409, `another device kept writing to the profile; gave up after ${MAX_ATTEMPTS} attempts, nothing of this change was saved`)
   }
@@ -220,11 +241,13 @@ export class StateStore {
 /** Guards against leap itself building a document the app or server would choke on. */
 export function checkDocument(draft: State, before: State | null, options: { allowUnitChange?: boolean } = {}): string[] {
   const problems: string[] = []
+  // Only what this change touched: a key the server already holds in a wrong shape is not leap's to refuse every write over.
+  const changed = (key: string) => !before || !sameJson(draft[key], before[key])
   for (const key of LIST_KEYS) {
-    if (key in draft && !Array.isArray(draft[key])) problems.push(`${key} must be a list`)
+    if (key in draft && !Array.isArray(draft[key]) && changed(key)) problems.push(`${key} must be a list`)
   }
   for (const key of MAP_KEYS) {
-    if (key in draft && !isRecord(draft[key])) problems.push(`${key} must be an object`)
+    if (key in draft && !isRecord(draft[key]) && changed(key)) problems.push(`${key} must be an object`)
   }
   if (!Object.keys(draft).some((k) => k !== '_rev' && k !== '_ts')) problems.push('the document would be empty')
   if (!before) return problems

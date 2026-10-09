@@ -134,11 +134,34 @@ describe('StateStore.update', () => {
     expect((fake.state!.workouts as unknown[]).length).toBe(2)
   })
 
+  it('does not report an applied write as failed when its answer is garbled', async () => {
+    const fake = new FakeOpenGym(profile(), 2)
+    fake.garbleAfterApply = 1
+    const r = await store(fake).update(createWorkout, verifyCreated)
+    expect(r.ok, !r.ok ? r.message : '').toBe(true)
+    expect(fake.puts).toHaveLength(1)
+    expect((fake.state!.workouts as unknown[]).length).toBe(2)
+  })
+
+  it('does not take a check that the old document passes as proof a lost write landed', async () => {
+    const fake = new FakeOpenGym({ ...profile(), queue: { ids: ['a'], label: 'old' } }, 2)
+    fake.failBeforeApply = 1
+    const relabel = (draft: State) => {
+      draft.queue = { ids: ['a'], label: 'new' }
+      return apply(null)
+    }
+    // This check cannot tell the change from the document before it.
+    const r = await store(fake).update(relabel, { verify: (s) => ((s.queue as { ids: string[] }).ids[0] === 'a' ? [] : ['queue']) })
+    expect(r.ok, !r.ok ? r.message : '').toBe(true)
+    expect(fake.puts).toHaveLength(1)
+    expect(fake.state!.queue).toEqual({ ids: ['a'], label: 'new' })
+  })
+
   it('says plainly when no attempt was confirmed and none landed', async () => {
     const fake = new FakeOpenGym(profile(), 2)
     fake.failBeforeApply = 4
     const r = await store(fake).update(createWorkout, verifyCreated)
-    expect(!r.ok && r.message).toMatch(/did not confirm any of 4 attempts and the change is not in the profile/)
+    expect(!r.ok && r.message).toMatch(/did not confirm any of 4 attempts and the change was not in the profile when it was read again; a late one may still land/)
     expect(fake.puts).toHaveLength(0)
   })
 
@@ -224,6 +247,12 @@ describe('StateStore.update', () => {
 describe('checkDocument', () => {
   it('accepts a document that keeps unit and bookkeeping', () => {
     expect(checkDocument({ ...profile(), lang: 'en' }, profile())).toEqual([])
+  })
+
+  it('does not refuse a write over a key the server already holds in a wrong shape', () => {
+    const before = { ...profile(), reminder: null } as State
+    expect(checkDocument({ ...before, lang: 'en' }, before)).toEqual([])
+    expect(checkDocument({ ...before, reminder: [] } as State, before)).toEqual(['reminder must be an object'])
   })
 
   it('allows a deliberate unit switch', () => {

@@ -43,6 +43,8 @@ export class FakeOpenGym {
   failBeforeApply = 0
   /** Accept the next N PUTs but answer 504, as a reverse proxy that gave up waiting does. */
   gatewayAfterApply = 0
+  /** Accept the next N PUTs but answer 200 with a body that is not the JSON openGym sends (cut short, a proxy's page). */
+  garbleAfterApply = 0
   /** Runs right after a PUT was applied: simulate another device writing before leap re-reads. */
   afterApply: ((fake: FakeOpenGym) => void) | undefined
   /** What `GET /api/health` answers (openGym 1.4.0 adds `writable`). */
@@ -117,6 +119,10 @@ export class FakeOpenGym {
     if (this.gatewayAfterApply > 0) {
       this.gatewayAfterApply--
       return new StubReply(504, '<html><body>504 Gateway Time-out</body></html>')
+    }
+    if (this.garbleAfterApply > 0) {
+      this.garbleAfterApply--
+      return new StubReply(200, '{"ok":tr')
     }
     if (this.dropResponses > 0) {
       this.dropResponses--

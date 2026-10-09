@@ -1,5 +1,5 @@
 import { isRecord, listOf, mapOf, type Entry, type State } from '../state/types.js'
-import { addDays, isoDate } from './dates.js'
+import { addDays, dayOf, zoneOf } from './dates.js'
 import { routineIdsOf } from './sets.js'
 
 /**
@@ -44,7 +44,7 @@ export function queueOf(state: State | null): Queue | null {
     ids,
     since: q.since as number | undefined,
     label: typeof q.label === 'string' ? q.label : '',
-    startsOn: typeof q.startsOn === 'string' ? q.startsOn : isoDate(new Date(Number(q.since) || 0)),
+    startsOn: typeof q.startsOn === 'string' ? q.startsOn : dayOf(Number(q.since) || 0, zoneOf(state)),
   } as Queue
 }
 
@@ -164,6 +164,13 @@ export interface QueueView {
   sessions: { id: string; name: string; state: 'done' | 'next' | 'pinned' | 'later'; pinnedTo?: string }[]
 }
 
+/** The label Plan's editor saves a loop with: the live round's, else the saved loop's, else none (Plan.jsx seqLabel). */
+export function loopLabel(state: State | null): string {
+  const q = queueOf(state)
+  const rotation = state?.rotation
+  return q?.label || (isRecord(rotation) && typeof rotation.label === 'string' ? rotation.label : '') || ''
+}
+
 /** The pass as Home shows it: each session done, next, pinned to a day or later. Null without a queue. */
 export function queueView(state: State | null, today: string): QueueView | null {
   const q = queueOf(state)
@@ -190,6 +197,22 @@ export function queueView(state: State | null, today: string): QueueView | null 
       const state_ = !remaining.includes(id) ? 'done' : id === next ? 'next' : pin ? 'pinned' : 'later'
       return { id, name: nameOf(id), state: state_, ...(pin ? { pinnedTo: pin.iso } : {}) }
     }),
+  }
+}
+
+/** A round for tool output: the same shape in every tool. */
+export function roundOut(v: QueueView | null) {
+  if (!v) return null
+  return {
+    managedBy: v.managedBy,
+    ...(v.label ? { label: v.label } : {}),
+    done: v.done,
+    total: v.total,
+    ...(v.complete ? { complete: true } : {}),
+    startsOn: v.startsOn,
+    ...(v.waiting ? { waiting: true } : {}),
+    ...(v.strict ? { strict: true } : {}),
+    sessions: v.sessions,
   }
 }
 
@@ -236,9 +259,8 @@ export function startPass(state: State, today: string, now: number): boolean {
  * its start, so progress survives a reorder; pins of sessions taken out are
  * cleared; an edit that leaves the pass complete starts the next one.
  */
-export function saveRotation(state: State, ids: string[], newId: () => string, today: string, now: number): { swept: string[]; refilled: boolean } {
+export function saveRotation(state: State, ids: string[], label: string, newId: () => string, today: string, now: number): { swept: string[]; refilled: boolean } {
   const prev = queueOf(state)
-  const label = isRecord(state.rotation) && typeof state.rotation.label === 'string' ? state.rotation.label : ''
   const id = isRecord(state.rotation) && typeof state.rotation.id === 'string' ? state.rotation.id : newId()
   state.rotation = { ...(isRecord(state.rotation) ? state.rotation : {}), id, sequence: ids, label }
   state.queue = { ids, since: prev?.since ?? now, startsOn: prev?.startsOn ?? today, label, rotationId: id, ...(prev?.strict === true ? { strict: true } : {}) }

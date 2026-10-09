@@ -4,7 +4,7 @@ Guidance for working in this repository.
 
 ## What this is
 
-**leap** is an MCP server for [openGym](https://github.com/DuarteSantos8/openGym),
+**leap** is an MCP server for [openGym](https://gitlab.com/DuarteSantos8/opengym),
 a self-hosted gym and body-weight tracker. It runs on the user's machine (stdio)
 and talks to their openGym instance **only through its HTTP API**, signed in
 with the same Bearer token the phone app uses.
@@ -87,7 +87,7 @@ src/
   log.ts, version.ts
   http/
     core.ts            the one request function: Bearer token, User-Agent, stderr log, Result
-    result.ts          Result<T> = { ok: true, status, data } | { ok: false, status, message, code?, retryAfter?, body }
+    result.ts          Result<T> = { ok: true, status, data } | { ok: false, status, message, code?, retryAfter?, body, request? }
     redact.ts          token redaction (configured token and every "token" field in bodies)
   catalog/
     exercises.ts       built-in exercises (data/exercises.json, openGym's catalogue), alias ids,
@@ -100,10 +100,12 @@ src/
     queue.ts           rotation and session queue: done rule, pins, rounds, refill, day notes
                        (ported from openGym queue.js / rotation.js)
     dumbbells.ts       what a dumbbell weight means (per bell / both), volume factor, conversion
-    dates.ts           local calendar days (`YYYY-MM-DD`), weekdays
+    dates.ts           local calendar days (`YYYY-MM-DD`), weekdays; days and times in the user's
+                       time zone (`reminder.tz`, else the machine's)
     routine-items.ts   routine exercise: stored format ↔ tool format, app defaults, policies
     workout-items.ts   logged set and entry: stored format ↔ tool format, session name
-    workouts.ts        sorting, PR badge rebuild, remembered-weight raise/lower (the app's rules)
+    workouts.ts        sorting, workout key (id or day|start), unchanged comparison, PR badge rebuild,
+                       remembered-weight raise/lower (the app's rules)
     stats.ts           1RM formulas (seven + weighted) and best set, PR rule (beatsWeight), exercise sessions,
                        muscle loads (dataset muscles, synonyms mapped to target names)
   media/
@@ -119,7 +121,7 @@ src/
     backup.ts          pre-write backups
     ids.ts             entry ids in the app's format
   tools/
-    types.ts, context.ts, respond.ts, index.ts
+    types.ts, context.ts, respond.ts, index.ts, schema.ts (shared input schemas), write.ts (shared write reporting)
     account/           read_me, read_instance; profile.ts: read_profile, read_settings,
                        read_document (raw escape hatch: any top-level key); write.ts:
                        read_account, write_passkey_name, write_pairing_code, delete_all_sessions
@@ -187,7 +189,7 @@ changes the document. Every write goes through `StateStore.update(mutate, { veri
    this write's `_ts` it was applied (never redo it), otherwise retry. A 503
    "state unreadable" means nothing was written.
 7. Read back and run `verify` (compare entries without their stamps); report
-   `notPersisted`, `retries`, `warnings`.
+   `notPersisted`, `conflictsRedone`, `warnings`.
 
 Rules for mutate functions:
 
@@ -273,7 +275,8 @@ writes with openGym's own merge code.
 
 1.1.0 (openGym 1.4.0, 2026-10-09): stamped writes, the bundled catalogue and
 search, rotation and session queue, the 1.4.0 training fields, 1RM formulas,
-dumbbell meanings, measurements and the new settings. The ports were checked
-against openGym's own functions with randomised states (stampChange: 4,000
-changes; effective plan, round view, refill and rotation save: about 47,000
-checks; no difference), and the live tests pass against the 1.4.0 API image.
+dumbbell meanings, measurements and the new settings. The ports are checked
+against openGym's own functions with randomised states by
+`scripts/check-parity.mjs` (stampChange, effective plan, round view, refill and
+rotation save: about 51,000 checks, no difference at v1.4.0), and the live tests
+pass against the 1.4.0 API image. A whole-project review (five reviewers) followed.

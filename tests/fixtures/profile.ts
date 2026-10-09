@@ -104,3 +104,44 @@ export function profile(): Record<string, unknown> {
     futureFeature: { keep: 'me' },
   }
 }
+
+/**
+ * A workout as openGym 1.4.0 stores per-side intensifiers (workout-model.js
+ * syncSideAggregate): drops and bursts on each side, the row mirroring their
+ * type; plus values the app writes that a form would not (a burst with no rest,
+ * a drop of 0 reps, a 0-second hold, 0 cardio minutes, both rir and rpe).
+ */
+export function appValuesWorkout(): Record<string, unknown> {
+  const start = new Date('2026-10-06T07:00:00').getTime()
+  return {
+    id: 'w-app',
+    d: '2026-10-06',
+    start,
+    end: start + 40 * min,
+    routineIds: [],
+    routineId: null,
+    name: 'Freestyle',
+    entries: [
+      {
+        id: '0294',
+        sets: [
+          {
+            w: 14, r: 20, done: true, rir: 1, type: 'dropset',
+            sides: { L: { w: 14, r: 10, done: true, rir: 1, type: 'dropset', drops: [{ w: 10, r: 6 }] }, R: { w: 14, r: 10, done: true, rir: 2, type: 'dropset', drops: [{ w: 10, r: 5 }] } },
+          },
+          {
+            w: 12, r: 24, done: true, type: 'restpause',
+            sides: { L: { w: 12, r: 12, done: true, type: 'restpause', clusters: [{ r: 3, restSec: 0 }] }, R: { w: 12, r: 12, done: true, weightOrigin: 'manual', type: 'restpause', clusters: [{ r: 2, restSec: 0 }] } },
+          },
+        ],
+        topW: 14,
+      },
+      { id: '0025', sets: [{ w: 80, r: 6, done: true, rir: 2, rpe: 8, type: 'dropset', drops: [{ w: 60, r: 0 }] }], topW: 80 },
+      { id: 'cplank', sets: [{ sec: 0, w: 0, done: true }], topW: null },
+      { id: '9001', sets: [{ min: 0, speed: 6, done: true }], topW: null },
+    ],
+    prs: [],
+    vol: 1158,
+    _ts: start + 40 * min,
+  }
+}

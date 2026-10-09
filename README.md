@@ -1,6 +1,6 @@
 # leap 🦊
 
-An MCP server for [openGym](https://github.com/DuarteSantos8/openGym): lets AI
+An MCP server for [openGym](https://gitlab.com/DuarteSantos8/opengym): lets AI
 assistants log, edit and analyze your workouts, routines, body weight and PRs on
 your self-hosted instance, through openGym's own HTTP API.
 

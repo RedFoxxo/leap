@@ -9,7 +9,7 @@ import type { ToolOutput } from './types.js'
  * anything to know (conflicts redone, values that did not persist, warnings).
  */
 export function written<R>(r: Written<R>, shown: Record<string, unknown>): ToolOutput {
-  if (r.unchanged) return success({ saved: false, unchanged: true, note: 'That is already how the profile stands; nothing was written.', ...shown })
+  if (r.unchanged) return success({ saved: false, unchanged: true, ...shown, message: 'That is already how the profile stands; nothing was written.' })
   return success({
     saved: r.notPersisted.length ? 'partly' : true,
     revision: r.rev,

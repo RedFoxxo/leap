@@ -171,6 +171,47 @@ describe('write_routine', () => {
     await h.close()
   })
 
+  it('writes read_routine’s output back unchanged, odd old data and inherited triple progression included', async () => {
+    const state = profile()
+    const push = (state.routines as any[])[0]
+    push.prog = 'triple'
+    push.ex[0] = { ...push.ex[0], prog: undefined, repsMin: 6, reps: 9, side: true }
+    delete push.ex[0].prog
+    const { h, fake } = await setup(state)
+    const read = await h.call('read_routine', { id: PUSH })
+    const r = await h.call('write_routine', { id: PUSH, exercises: read.json.exercises })
+    expect(r.json, r.text).toMatchObject({ saved: false, unchanged: true })
+    expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('gives triple progression its set ceiling only when triple is chosen, and drops it when it is not', async () => {
+    const { h, routine } = await setup()
+    await h.call('write_routine', { id: PUSH, progression: 'triple', exercises: [{ exerciseId: '0025' }, { exerciseId: '0294' }, { exerciseId: '0043', reps: 8 }] })
+    expect(routine(PUSH).ex[2]).not.toHaveProperty('setsMax')
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', progression: 'triple' }, { exerciseId: '0294' }, { exerciseId: '0043' }] })
+    expect(routine(PUSH).ex[0].setsMax).toBe(6)
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', progression: 'double', repsMin: 6 }, { exerciseId: '0294' }, { exerciseId: '0043' }] })
+    expect(routine(PUSH).ex[0]).not.toHaveProperty('setsMax')
+    expect(routine(PUSH).ex[0].repsMin).toBe(6)
+    await h.close()
+  })
+
+  it('switches an exercise between reps and timed as the app’s editor does', async () => {
+    const { h, routine } = await setup()
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', intensifier: { type: 'dropset', count: 1, pct: 20 } }, { exerciseId: '0294' }] })
+    const timed = await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', mode: 'time' }, { exerciseId: '0294' }] })
+    expect(timed.isError, timed.text).toBe(false)
+    expect(routine(PUSH).ex[0]).toMatchObject({ mode: 'time', sec: 45 })
+    expect(routine(PUSH).ex[0]).not.toHaveProperty('reps')
+    expect(routine(PUSH).ex[0]).not.toHaveProperty('intensifier')
+    expect((await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', intensifier: { type: 'dropset', count: 1, pct: 20 } }, { exerciseId: '0294' }] })).text).toMatch(/drop sets and rest-pause are for exercises done in reps/)
+    await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', mode: 'reps' }, { exerciseId: '0294' }] })
+    expect(routine(PUSH).ex[0]).toMatchObject({ mode: 'reps', reps: 10 })
+    expect(routine(PUSH).ex[0]).not.toHaveProperty('sec')
+    await h.close()
+  })
+
   it('checks the 1.4.0 options as the app’s editor does', async () => {
     const { h, fake } = await setup(withCardio())
     const refused: [Record<string, unknown>, RegExp][] = [
@@ -184,6 +225,16 @@ describe('write_routine', () => {
     ]
     for (const [x, message] of refused) expect((await h.call('write_routine', { name: 'X', exercises: [x] })).text, JSON.stringify(x)).toMatch(message)
     expect(fake.puts).toHaveLength(0)
+    await h.close()
+  })
+
+  it('adds an exercise to a stored superset when only that exercise names it', async () => {
+    const { h, routine } = await setup()
+    const r = await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025' }, { exerciseId: '0294' }, { exerciseId: '0043', superset: 'sg1' }] })
+    expect(r.isError, r.text).toBe(false)
+    expect(routine(PUSH).ex.map((e: { sg?: string }) => e.sg)).toEqual(['sg1', 'sg1', 'sg1'])
+    expect((await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025' }, { exerciseId: '0294' }, { exerciseId: '0043', superset: 'B' }] })).text).toMatch(/superset "B" has only one exercise/)
+    expect((await h.call('write_routine', { id: PUSH, exercises: [{ exerciseId: '0025', superset: 'sg1' }, { exerciseId: '0043', superset: null }, { exerciseId: '0294' }] })).text).toMatch(/superset "sg1" is split/)
     await h.close()
   })
 

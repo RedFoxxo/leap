@@ -3,11 +3,33 @@ import { profile } from '../fixtures/profile.js'
 import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { harness } from '../helpers/harness.js'
 
-async function setup(state: Record<string, unknown> = profile()) {
-  return harness({ stub: new FakeOpenGym(state).stub })
+async function setup(state: Record<string, unknown> = profile(), now?: number) {
+  return harness({ stub: new FakeOpenGym(state).stub, ...(now !== undefined ? { context: { now: () => now } } : {}) })
 }
 
 afterEach(() => vi.useRealTimers())
+
+describe('exercise ids and dumbbell meanings', () => {
+  it('reads an alias id as the exercise it draws', async () => {
+    const state = profile()
+    ;(state.workouts as Record<string, unknown>[]).push({ id: 'w-kb', d: '2026-10-06', start: 3, entries: [{ id: '12001', sets: [{ w: 16, r: 12, done: true }] }] })
+    const h = await setup(state)
+    expect((await h.call('read_exercise_history', { exerciseId: '12900' })).json).toMatchObject({ id: '12001', sessionsTotal: 1 })
+    expect((await h.call('read_workouts', { exerciseId: '12900' })).json.workouts.map((w: { id: string }) => w.id)).toEqual(['w-kb'])
+    await h.close()
+  })
+
+  it('names the meaning dumbbell weights are read in with the codes read_exercise uses', async () => {
+    const state = profile()
+    ;(state as Record<string, unknown>).dbLoad = { '0294': { mode: 'each', _ts: 1 } }
+    const h = await setup(state)
+    expect((await h.call('read_exercise_history', { exerciseId: '0294' })).json.weightMeans).toBe('each')
+    const records = (await h.call('read_records')).json.records
+    expect(records.find((r: { id: string }) => r.id === '0294').weightMeans).toBe('each')
+    expect(records.find((r: { id: string }) => r.id === '0025')).not.toHaveProperty('weightMeans')
+    await h.close()
+  })
+})
 
 describe('read_exercise_history', () => {
   it('lists sessions newest first with all-time bests', async () => {
@@ -95,6 +117,13 @@ describe('read_training_summary', () => {
     const r = await h.call('read_training_summary')
     expect(r.json).toMatchObject({ from: '2026-07-16', to: '2026-10-07' })
     expect(r.json.periods).toHaveLength(13)
+    await h.close()
+  })
+
+  it('takes today from the server’s clock', async () => {
+    const h = await setup(profile(), new Date('2026-10-07T12:00:00').getTime())
+    expect((await h.call('read_training_summary')).json).toMatchObject({ from: '2026-07-16', to: '2026-10-07' })
+    expect((await h.call('read_muscle_balance')).json).toMatchObject({ from: '2026-10-01', to: '2026-10-07' })
     await h.close()
   })
 })

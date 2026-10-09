@@ -35,8 +35,9 @@ export const writeBodyweight = defineTool({
     'Log body weight for a day (default today), in the profile unit. openGym keeps one weigh-in per day, so this replaces that day\'s entry if there is one.',
   input: { weight, date: isoDate.optional() },
   async handler(args, ctx) {
-    const date = args.date ?? today(ctx.now())
-    if (date > today(ctx.now())) return invalid(`${date} is in the future; a weigh-in is logged for a day that happened`)
+    const day = today(ctx.now(), await ctx.store.zone())
+    const date = args.date ?? day
+    if (date > day) return invalid(`${date} is in the future; a weigh-in is logged for a day that happened`)
     return change(
       ctx,
       'save the weigh-in',
@@ -119,8 +120,9 @@ const SETTINGS = {
     .union([z.enum(['lime', 'sky', 'orange', 'violet', 'pink', 'red', 'teal', 'gold']), z.string().regex(/^#[0-9a-fA-F]{6}$/)])
     .optional()
     .describe('A preset (lime green, sky blue, orange, violet purple, pink, red, teal, gold yellow) or an own colour as #rrggbb; the app nudges an own colour until text on it stays readable'),
-  restSec: z.number().int().min(0).max(3600).optional().describe('Default rest between sets, seconds'),
-  restPauseSec: z.number().int().min(0).max(600).optional().describe('Rest between rest-pause bursts, seconds'),
+  // The ranges of the app's duration wheels (openGym frontend/src/lib/duration.js, v1.4.0).
+  restSec: z.number().int().min(0).max(900).optional().describe('Default rest between sets, seconds; 0 turns the rest timer off'),
+  restPauseSec: z.number().int().min(5).max(300).optional().describe('Rest between rest-pause bursts, seconds'),
   effort: z.enum(['none', 'rir', 'rpe']).optional().describe('Per-set effort scale'),
   weekStart: z.union([z.literal(0), z.literal(1)]).optional().describe('First weekday: 1 Monday, 0 Sunday'),
   startFrom: z.enum(['plan', 'last']).optional().describe("Planned sessions open at the routine's reps (plan) or the last session's (last)"),
@@ -135,7 +137,7 @@ const SETTINGS = {
   gifSize: z.enum(['full', 'mini', 'off']).optional().describe('Size of exercise animations'),
   vibrate: flag,
   vibrateOnSilent: flag.describe('Android: buzz at the end of a rest even when the phone is on silent'),
-  connStatus: flag.describe('Show the connection line at the top'),
+  connStatus: flag.describe('Show the connection line at the top; turning it on also brings back the "on this phone only" line'),
   connLocal: flag.describe('Show the "on this phone only" line'),
   shareMap: flag.describe('Put the muscle map on a workout shared as an image'),
   wdec: z.union([z.literal(1), z.literal(2)]).optional().describe('Decimals shown on weights'),
@@ -181,9 +183,11 @@ export const writeSettings = defineTool({
           const from = draft[key] ?? null
           if (key === 'reminder') {
             const current = isRecord(draft.reminder) ? draft.reminder : { on: false, time: '08:00', tz: null }
-            const next: Record<string, unknown> = { ...current, ...(value as object) }
+            const given = value as { tz?: unknown; time?: unknown; nudge?: unknown }
+            const next: Record<string, unknown> = { ...current, ...given }
             // The app sets the device's zone with every reminder change; without one the server fires it on UTC.
-            if (next.tz == null && (next.on === true || (value as { time?: unknown }).time !== undefined || (value as { nudge?: unknown }).nudge === true)) next.tz = localTimeZone()
+            // A zone given, null included, is kept as given.
+            if (given.tz === undefined && next.tz == null && (next.on === true || given.time !== undefined || given.nudge === true)) next.tz = localTimeZone()
             draft.reminder = next
           } else if (key === 'accent' && typeof value === 'string' && value.startsWith('#')) {
             // An own colour is two settings the app writes together (openGym lib/accent.js, v1.4.0).
@@ -195,21 +199,28 @@ export const writeSettings = defineTool({
           // A profile that never picked a language follows an automatic one (`langAuto`) and ignores `lang`; the app's own choice turns it off.
           if (key === 'lang') draft.langAuto = false
           changed[key] = { from, to: draft[key] }
+          // Turning the connection line on brings the "on this phone only" line back (openGym views/Settings.jsx, v1.4.0).
+          if (key === 'connStatus' && value === true && args.connLocal === undefined && draft.connLocal !== true) {
+            changed.connLocal = { from: draft.connLocal ?? null, to: true }
+            draft.connLocal = true
+          }
         }
         return apply(changed)
       },
       (changed) => ({ changed }),
       {
-        verify: (s) =>
-          given
+        verify: (s, changed) => [
+          ...given
             .filter(([k, v]) =>
               k === 'reminder'
-                ? Object.entries(v as object).some(([rk, rv]) => mapOf(s, 'reminder')[rk] !== rv)
+                ? Object.entries(isRecord(changed.reminder?.to) ? changed.reminder.to : {}).some(([rk, rv]) => JSON.stringify(mapOf(s, 'reminder')[rk] ?? null) !== JSON.stringify(rv ?? null))
                 : k === 'accent' && typeof v === 'string' && v.startsWith('#')
                   ? s.accent !== 'custom' || s.accentCustom !== v.toLowerCase()
                   : s[k] !== v,
             )
             .map(([k]) => k),
+          ...(changed.connLocal && s.connLocal !== true ? ['connLocal'] : []),
+        ],
       },
     )
   },
@@ -217,7 +228,7 @@ export const writeSettings = defineTool({
 
 export const writeExerciseNote = defineTool({
   name: 'write_exercise_note',
-  description: 'Set the standing note of an exercise (shown every time it is done, e.g. "seat 4, pin 7"); an empty note removes it. At most 500 characters.',
+  description: `Set the standing note of an exercise (shown every time it is done, e.g. "seat 4, pin 7"); an empty note removes it. At most 500 characters. ${LAST_CHANGE_NOTE}`,
   input: { exerciseId, note: z.string().max(500) },
   async handler(args, ctx) {
     const check = await exerciseCheck(ctx)
@@ -322,6 +333,8 @@ const RAW_PROTECTED = new Set<string>([
   'workouts', 'routines', 'bodyweight', 'customEx', 'week', 'dayPlan', 'exWeights', 'exNotes', 'favEx', 'reminder', 'targetW',
   'unit', 'unitSet', 'resetAt', 'resetIds', 'coach', 'active', ...SYNC_KEYS,
   'queue', 'rotation', 'scheduleMode', 'dayNotes', 'measurements', 'customMeasurements', 'dbLoad', 'dumbbells',
+  // write_settings validates these, and writes the last three in step with accent, restSound and lang.
+  ...Object.keys(SETTINGS), 'accentCustom', 'classicChime', 'langAuto',
 ])
 
 /**

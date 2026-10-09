@@ -11,6 +11,13 @@ describe('server', () => {
     expect(VERSION).toBe(pkg.version)
   })
 
+  it('lists every tool in the README, and only those', () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    const section = readme.slice(readme.indexOf('## Tools'), readme.indexOf('### Not offered'))
+    const listed = [...section.matchAll(/`((?:read|write|delete|admin)_[a-z_]+)`/g)].map((m) => m[1])
+    expect(listed.sort()).toEqual(allTools().map((t) => t.name).sort())
+  })
+
   it('states the supported openGym the same way everywhere', () => {
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
     const range = `${OPENGYM.minimum} or later (tested with ${OPENGYM.tested})`
@@ -43,10 +50,13 @@ describe('tool naming contract', () => {
     expect(new Set(names).size).toBe(names.length)
   })
 
-  it('read tools are annotated read-only and nothing else is', async () => {
+  it('read tools and the admin tools that only read are annotated read-only, nothing else is', async () => {
     const h = await harness()
+    const adminReads = new Set(['admin_users', 'admin_user', 'admin_invites', 'admin_audit', 'admin_coach'])
     for (const tool of await h.listTools()) {
-      expect(tool.annotations?.readOnlyHint, tool.name).toBe(tool.name.startsWith('read_'))
+      const readOnly = tool.name.startsWith('read_') || adminReads.has(tool.name)
+      expect(tool.annotations?.readOnlyHint, tool.name).toBe(readOnly)
+      expect(tool.annotations?.destructiveHint, tool.name).toBe(!readOnly)
     }
     await h.close()
   })

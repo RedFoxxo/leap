@@ -166,7 +166,7 @@ export class HttpCore {
     try {
       return ok(JSON.parse(text) as T, response.status)
     } catch {
-      return err(response.status, `Expected JSON from openGym but got ${describeBody(text)}`, capBody(text), shown)
+      return err(response.status, `Expected JSON from openGym but got ${describeBody(text, response.status)}`, capBody(text), shown)
     }
   }
 }
@@ -218,10 +218,11 @@ function capBody(text: string): string {
   return text.length <= BODY_CAP ? text : `${text.slice(0, BODY_CAP)}… (${text.length - BODY_CAP} more characters)`
 }
 
-function describeBody(text: string): string {
+function describeBody(text: string, status: number): string {
   const head = text.trimStart().slice(0, 15).toLowerCase()
-  if (head.startsWith('<!doctype html') || head.startsWith('<html')) return 'an HTML page (is OPENGYM_URL the openGym instance?)'
-  return 'a non-JSON body'
+  if (!(head.startsWith('<!doctype html') || head.startsWith('<html'))) return 'a non-JSON body'
+  // A success or a 404 as an HTML page means something else answered; other errors are a proxy's own page.
+  return (status >= 200 && status < 300) || status === 404 ? 'an HTML page (is OPENGYM_URL the openGym instance?)' : 'an error page from a proxy in front of openGym'
 }
 
 /** openGym's own message: every error body is `{"error": "..."}`. */
@@ -229,7 +230,7 @@ export function errorMessage(status: number, text: string): string {
   const parsed = parseObject(text)
   if (typeof parsed?.error === 'string' && parsed.error) return `${status}: ${parsed.error}`
   const trimmed = text.trim()
-  if (trimmed.startsWith('<')) return `${status}: openGym returned ${describeBody(trimmed)}`
+  if (trimmed.startsWith('<')) return `${status}: openGym returned ${describeBody(trimmed, status)}`
   const firstLine = trimmed.split('\n', 1)[0]?.slice(0, 200)
   return firstLine ? `${status}: ${firstLine}` : `${status}: request failed with no body`
 }

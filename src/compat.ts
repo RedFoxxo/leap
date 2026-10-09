@@ -52,8 +52,9 @@ export class ServerCheck {
     if (this.last && (this.last.compat.writable || this.now() - this.last.at < RECHECK_MS)) return this.last.compat
     const health = await this.http.request<{ ok?: unknown; writable?: unknown }>({ method: 'GET', path: '/api/health' })
     const compat = compatOf(health)
-    // A network failure says nothing about the version: ask again next time.
-    if (health.ok || health.status !== 0) this.last = { at: this.now(), compat }
+    // Only a real answer is remembered: a network failure or a proxy's error page (openGym restarting)
+    // says nothing about the version, so the next write asks again.
+    if (health.ok || (health.status === 503 && compat.openGym !== 'unknown')) this.last = { at: this.now(), compat }
     return compat
   }
 

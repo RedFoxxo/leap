@@ -112,6 +112,69 @@ describe('stampChange', () => {
     expect((next.dbLoad as Record<string, Record<string, unknown>>)['0294']!._ts).toBe(T)
   })
 
+  it('stamps custom exercises and equipment profiles like routines', () => {
+    const prev: State = { customEx: [{ id: 'c1', n: 'Plank', _ts: 1 }], equipProfiles: [{ id: 'e1', name: 'Home', equipment: [] }] }
+    const next = stamped(prev, (s) => {
+      ;(s.customEx as Record<string, unknown>[])[0]!.n = 'Side plank'
+      ;(s.equipProfiles as Record<string, unknown>[])[0]!.name = 'Gym'
+    })
+    expect((next.customEx as Record<string, unknown>[])[0]).toMatchObject({ _ts: T, _f: { n: T } })
+    expect((next.equipProfiles as Record<string, unknown>[])[0]).toMatchObject({ _ts: T, _f: { name: T } })
+  })
+
+  it('leaves a routine put back after its removal with the edit time it had', () => {
+    const prev: State = { routines: [], deleted: { routines: { r: 50 } } }
+    const next = stamped(prev, (s) => (s.routines as unknown[]).push({ id: 'r', name: 'Back', _ts: 10 }))
+    expect((next.routines as Record<string, unknown>[])[0]).toEqual({ id: 'r', name: 'Back', _ts: 10 })
+    expect((next.deleted as Record<string, Record<string, number>>).routines!.r).toBe(-T)
+  })
+
+  it('stamps an own accent colour as one choice in two settings', () => {
+    const prev: State = { accent: 'custom', accentCustom: '#111111', edited: { accent: 1, accentCustom: 1 } }
+    const next = stamped(prev, (s) => (s.accentCustom = '#222222'))
+    expect(next.edited).toEqual({ accent: T, accentCustom: T })
+  })
+
+  it('forgets per-key stamps of keys gone for 180 days, keeps recent ones', () => {
+    const old = T - 181 * 86_400_000
+    const prev: State = { exNotes: {}, edited: { 'exNotes.0025': old, 'exNotes.0043': T - 1000, restSec: old } }
+    const next = stamped(prev, (s) => (s.restSec = 60))
+    expect(next.edited).toEqual({ 'exNotes.0043': T - 1000, restSec: T })
+  })
+
+  it('keeps at most 5000 removal records per list, dropping the oldest', () => {
+    const many = Object.fromEntries(Array.from({ length: 5000 }, (_, i) => [`w${i}`, i + 1]))
+    const prev: State = { workouts: [{ id: 'x', _ts: 1 }], deleted: { workouts: many } }
+    const next = stamped(prev, (s) => (s.workouts = []))
+    const records = (next.deleted as Record<string, Record<string, number>>).workouts!
+    expect(Object.keys(records)).toHaveLength(5000)
+    expect(records).not.toHaveProperty('w0')
+    expect(records.x).toBe(T)
+  })
+
+  it('completes an Undo marker the same change set, in a setting and in an entry field', () => {
+    const prev: State = { restSec: 90, routines: [{ id: 'r', name: 'A', _ts: 1 }] }
+    const next = stamped(prev, (s) => {
+      s.restSec = 60
+      s.undone = { restSec: [3, 4] }
+      const r = (s.routines as Record<string, unknown>[])[0]!
+      r.name = 'B'
+      r._u = { name: [5, 6] }
+    })
+    expect(next.undone).toEqual({ restSec: [3, 4, T] })
+    expect((next.routines as Record<string, unknown>[])[0]!._u).toEqual({ name: [5, 6, T] })
+  })
+
+  it('gives a corrected measurement the change’s time', () => {
+    const prev: State = { measurements: [{ d: '2026-10-01', t: 3, waist: 80 }] }
+    const next = stamped(prev, (s) => {
+      const m = (s.measurements as Record<string, unknown>[])[0]!
+      m.waist = 79
+      m.t = 4
+    })
+    expect((next.measurements as Record<string, unknown>[])[0]!.t).toBe(T)
+  })
+
   it('drops an Undo marker whose field moved on, keeps one still current', () => {
     const prev: State = { restSec: 90, sound: true, edited: { restSec: 10, sound: 12 }, undone: { restSec: [1, 5, 10], sound: [2, 6, 12] } }
     const next = stamped(prev, (s) => (s.restSec = 60))
@@ -165,7 +228,7 @@ describe('StateStore writes as a stamping client', () => {
       return apply(null)
     })
     expect(r.ok).toBe(false)
-    expect(!r.ok && r.message).toMatch(/cannot read the stored profile; nothing was written|nothing was written/)
+    expect(!r.ok && r.message).toMatch(/cannot read the stored profile.*nothing was written/)
     expect(fake.stub.find('PUT', '/api/data')).toHaveLength(1)
   })
 

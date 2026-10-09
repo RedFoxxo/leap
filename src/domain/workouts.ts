@@ -5,6 +5,29 @@ import { beatsWeight } from './stats.js'
 /** Whether an exercise is an assistance machine (less weight is better). */
 export type AssistedCheck = (exerciseId: string) => boolean
 
+/**
+ * Which workout a tool means: its id, or for a workout logged before ids its day and start, the
+ * key openGym's sync gives it; an edit or a move freezes that key as the id (openGym
+ * `workout-date.js` legacySyncKey and `session-edit.js` keyOf, v1.4.0, 28b7e4dc).
+ */
+export const workoutKey = (w: Entry): string => (w.id != null ? String(w.id) : `${String(w.d)}|${String(w.start)}`)
+
+/**
+ * The same data whatever order its keys were written in; a key holding undefined is no key
+ * (openGym `session-edit.js` sameData, v1.4.0, 28b7e4dc).
+ */
+export function sameData(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = (o: object) => Object.keys(o).filter((k) => (o as Record<string, unknown>)[k] !== undefined)
+  const ka = keys(a)
+  return ka.length === keys(b).length && ka.every((k) => sameData((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]))
+}
+
+/** What an edit is compared on: everything but what it works out again (volume, badges), its stamp and the id it freezes. */
+const DERIVED = new Set(['id', 'vol', 'prs', '_ts'])
+export const editedData = (w: Entry): Entry => Object.fromEntries(Object.entries(w).filter(([k]) => !DERIVED.has(k)))
+
 const byDayStart = (a: Entry, b: Entry) =>
   String(a.d) === String(b.d) ? (Number(a.start) || 0) - (Number(b.start) || 0) : String(a.d) < String(b.d) ? -1 : 1
 

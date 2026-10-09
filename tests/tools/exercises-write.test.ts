@@ -60,18 +60,47 @@ describe('write_custom_exercise', () => {
     ;(state.customEx as any[])[0].media = { kind: 'image', hash: 'b'.repeat(64) }
     const { h, doc } = await setup(state)
     await h.call('write_custom_exercise', { id: 'cplank', description: 'Squeeze glutes', assisted: false })
-    expect(doc().customEx[0]).toMatchObject({
+    expect(doc().customEx[0]).toEqual({
       id: 'cplank',
       n: 'Weighted plank',
       bp: 'waist',
       eq: 'weighted',
+      tg: 'abs',
+      custom: true,
       desc: 'Squeeze glutes',
       assisted: false,
       media: { kind: 'image', hash: 'b'.repeat(64) },
       _ts: NOW,
+      _f: { desc: NOW, assisted: NOW },
     })
     await h.call('write_custom_exercise', { id: 'cplank', url: null, assisted: null })
     expect(doc().customEx[0]).not.toHaveProperty('assisted')
+    expect(doc().customEx[0].tg).toBe('abs')
+    await h.close()
+  })
+
+  it('seeds the muscles of an exercise stored without primaries the way the app opens it', async () => {
+    const state = profile()
+    ;(state.customEx as any[]).push(
+      { id: 'cimp', n: 'Imported row', bp: 'back', eq: 'cable', tg: 'lats', sm: ['biceps', 'rear deltoids'], custom: true },
+      { id: 'cold', n: 'Old curl', bp: 'upper arms', eq: 'dumbbell', tg: 'biceps', primaries: ['biceps', 'grip'], secondaries: ['forearm', 'brachioradialis'], custom: true },
+    )
+    const { h, doc } = await setup(state)
+    await h.call('write_custom_exercise', { id: 'cplank', secondaryMuscles: ['obliques'] })
+    expect(doc().customEx[0]).toMatchObject({ tg: 'abs', primaries: ['abs'], secondaries: ['obliques'], muscleGroups: ['abs', 'obliques'] })
+    await h.call('write_custom_exercise', { id: 'cimp', target: 'upper-back' })
+    expect(doc().customEx[1]).toMatchObject({ tg: 'upper-back', primaries: ['upper-back'], secondaries: ['deltoids', 'biceps'], sm: ['deltoids', 'biceps'] })
+    // Names the body map does not know stay, at the end, as the app's inMuscleOrder keeps them.
+    await h.call('write_custom_exercise', { id: 'cold', target: 'biceps' })
+    expect(doc().customEx[2]).toMatchObject({ tg: 'biceps', primaries: ['biceps', 'grip'], secondaries: ['forearm', 'brachioradialis'], muscleGroups: ['biceps', 'grip', 'forearm', 'brachioradialis'] })
+    await h.call('write_custom_exercise', { id: 'cold', primaryMuscles: ['triceps', 'biceps'] })
+    expect(doc().customEx[2]).toMatchObject({ tg: 'biceps', primaries: ['biceps', 'triceps'], secondaries: ['forearm', 'brachioradialis'] })
+    const before = structuredClone(doc().customEx[2])
+    await h.call('write_custom_exercise', { id: 'cold', name: 'Old hammer curl' })
+    const { n: _n, _ts: _t, _f: _s, ...after } = doc().customEx[2]
+    const { n: _n2, _ts: _t2, _f: _s2, ...kept } = before
+    expect(after).toEqual(kept)
+    expect(Object.keys(doc().customEx[2]._f).filter((k) => !Object.keys(before._f).includes(k))).toEqual(['n'])
     await h.close()
   })
 
@@ -99,6 +128,17 @@ describe('cleanUrl', () => {
     expect(cleanUrl('ftp://example.com')).toBeNull()
     expect(cleanUrl('https://user:pw@example.com')).toBeNull()
     expect(cleanUrl('https://localhost:8080/x')).toBe('https://localhost:8080/x')
+  })
+
+  it('accepts and refuses the hosts the app does (media-refs.js plausibleHost)', () => {
+    expect(cleanUrl('https://example.com./x')).toBe('https://example.com./x')
+    expect(cleanUrl('http://[::1]:3000/')).toBe('http://[::1]:3000/')
+    expect(cleanUrl('https://10.0.0.2/x')).toBe('https://10.0.0.2/x')
+    expect(cleanUrl('https://xn--mnchen-3ya.de/')).toBe('https://xn--mnchen-3ya.de/')
+    expect(cleanUrl('https://-bad.example.com')).toBeNull()
+    expect(cleanUrl('https://bad-.example.com')).toBeNull()
+    expect(cleanUrl(`https://${'a'.repeat(64)}.com`)).toBeNull()
+    expect(cleanUrl('https://intranet/x')).toBeNull()
   })
 })
 

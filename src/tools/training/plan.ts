@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { addDays, today, WEEKDAYS, weekdayOf } from '../../domain/dates.js'
+import { addDays, today, WEEKDAYS, weekdayOf, zoneOf } from '../../domain/dates.js'
 import { planFor, routineName, weekdayRoutineIds } from '../../domain/plan.js'
-import { dayNoteOf, queueOf, queueUnusable, queueView, rotationIds, scheduleModeOf } from '../../domain/queue.js'
+import { dayNoteOf, queueOf, queueUnusable, queueView, rotationIds, roundOut, scheduleModeOf } from '../../domain/queue.js'
 import { itemForTools } from '../../domain/routine-items.js'
 import { routineIdsOf } from '../../domain/sets.js'
 import { listOf, mapOf, unitOf, type Entry, type State } from '../../state/types.js'
@@ -71,12 +71,13 @@ export const readRoutine = defineTool({
     const { state, exercises } = profile.data
     const routine = listOf(state, 'routines').find((r) => r.id === args.id)
     if (!routine) return failure(`No routine with id "${args.id}"; find ids with read_routines`)
-    const from = today(ctx.now())
+    const from = today(ctx.now(), zoneOf(state))
     const dates = Object.entries(mapOf(state, 'dayPlan'))
       .filter(([date, id]) => id === args.id && date >= from)
       .map(([date]) => date)
       .sort()
-    const { ex: _ex, prog, ...rest } = routine
+    // Sync stamps are openGym's bookkeeping, not part of the routine a caller writes back.
+    const { ex: _ex, prog, _ts: _t, _f: _fields, _u: _undo, ...rest } = routine
     const days = weekdaysOf(state, args.id)
     const done = lastDone(state, args.id)
     return success({
@@ -96,7 +97,7 @@ export const readRoutine = defineTool({
 export const readWeekPlan = defineTool({
   name: 'read_week_plan',
   description:
-    'The training plan. `schedule` is "week" (fixed weekdays) or "rotation" (A → B → C …: the next session is the first one not done yet, on whatever day is trained next). `rotation` is the current round: who runs it (the app\'s own rotation, or a planner\'s queue the app shows as "Externally managed"), each session done, next, pinned to a date or later, and when the next round starts; `savedRotation` is the loop it repeats. `week` holds the weekday routines (in rotation mode they count on top of the loop). Then, day by day from `from` (default today) for `days` days (default 7): what is planned and why (plannedBy: rest-override, override, pin, rotation, queue, weekday, rest), a missed-day note, and the workouts logged that day. The rotation answers only for today (or the day its round starts).',
+    'The training plan. `schedule` is "week" (fixed weekdays) or "rotation" (A → B → C …: the next session is the first one not done yet, on whatever day is trained next). `round` is the current round: who runs it (the app\'s own rotation, or a planner\'s queue the app shows as "Externally managed"), each session done, next, pinned to a date or later, and when it starts; `rotation` is the saved loop it repeats. `week` holds the weekday routines (in rotation mode they count on top of the loop). Then, day by day from `from` (default today) for `days` days (default 7): what is planned and why (plannedBy: rest-override, override, pin, rotation, queue, weekday, rest), a missed-day note, and the workouts logged that day. The rotation answers only for today (or the day its round starts).',
   input: {
     from: isoDate.optional(),
     days: z.number().int().min(1).max(62).optional(),
@@ -105,7 +106,7 @@ export const readWeekPlan = defineTool({
     const profile = await loadProfile(ctx)
     if (!profile.ok) return failure('Could not read the profile', profile)
     const { state } = profile.data
-    const day = today(ctx.now())
+    const day = today(ctx.now(), zoneOf(state))
     const start = args.from ?? day
     const named = (ids: string[]) => ids.map((id) => ({ id, name: routineName(state, id) }))
     const weekStart = state?.weekStart === 0 ? 0 : 1
@@ -129,9 +130,9 @@ export const readWeekPlan = defineTool({
     const saved = rotationIds(state)
     return success({
       schedule: scheduleModeOf(state),
-      ...(view ? { rotation: view } : {}),
+      ...(view ? { round: roundOut(view) } : {}),
       ...(queueUnusable(state) ? { rotationProblem: 'a round is stored but none of its routines exist any more; the app offers to discard it (write_schedule_mode with mode week, or write_session_queue with null for a planner\'s queue)' } : {}),
-      ...(saved.length ? { savedRotation: named(saved) } : {}),
+      ...(saved.length ? { rotation: named(saved) } : {}),
       weekStartsOn: WEEKDAYS[weekStart],
       week: Object.fromEntries(order.map((d) => [WEEKDAYS[d], named(weekdayRoutineIds(state, d).filter((id) => listOf(state, 'routines').some((r) => r.id === id)))])),
       days,
@@ -144,7 +145,7 @@ const round1 = (v: number) => Math.round(v * 10) / 10
 export const readBodyweight = defineTool({
   name: 'read_bodyweight',
   description:
-    'Body-weight log (one weigh-in per day), newest first, in the profile unit: the latest weigh-in, the goal (targetW) and the distance to it, the change over the 7 and 30 days up to the latest weigh-in, and the entries in the range (default the newest 30).',
+    'Body-weight log (one weigh-in per day), newest first, in the profile unit: the latest weigh-in, the goal weight (targetW) and the distance to it (toGoal), the change over the 7 and 30 days up to the latest weigh-in, and the entries in the range (default the newest 30).',
   input: {
     from: isoDate.optional(),
     to: isoDate.optional(),
@@ -172,7 +173,7 @@ export const readBodyweight = defineTool({
     return success({
       unit: unitOf(state),
       ...(latest ? { latest: { date: latest.d, weight: latest.w } } : {}),
-      ...(goal !== undefined ? { goal } : {}),
+      ...(goal !== undefined ? { goalWeight: goal } : {}),
       ...(goal !== undefined && latest ? { toGoal: round1(goal - Number(latest.w)) } : {}),
       ...(c7 !== undefined ? { change7d: c7 } : {}),
       ...(c30 !== undefined ? { change30d: c30 } : {}),
