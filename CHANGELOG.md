@@ -4,6 +4,34 @@ Versions follow [Semantic Versioning](https://semver.org/). The version lives in
 `package.json` and `src/version.ts` (a test keeps them equal) and is reported to
 MCP clients in the server handshake.
 
+## 1.2.0 — 2026-11-19
+
+- `write_download_media` reads a file's type from its bytes, not from what the
+  server says: only the seven media types are saved, under their own extension
+  (a file that is not one is refused). Where it goes (the folder exists, is not
+  hidden) is checked before anything is downloaded.
+- The tool list is about 9% smaller (fewer tokens in every session): no JSON
+  Schema dialect or default execution mode repeated on every tool, and shorter
+  sync notes and field descriptions. No tool or parameter changed.
+- **Toolsets**: `LEAP_TOOLSETS` (comma-separated: `training`, `routines`,
+  `body`, `stats`, `exercises`, `settings`, `media`, `coach`, `account`,
+  `admin`) registers only those groups of tools; unset, every tool is
+  registered as before. A name that is not a toolset is a startup error.
+  `LEAP_TOOLSETS=training,exercises,body` (20 tools, about 6,600 tokens) covers
+  everyday logging. See the README for each toolset's tools and cost.
+- The full tool list is smaller again, about 81 KB → 69 KB (about 20,300 →
+  17,300 tokens): the sync notes repeated in 16 tool descriptions are said once
+  in the server instructions (delete tools still say it in their answer),
+  annotations equal to the MCP defaults are left out (only read-only tools are
+  marked), nullable values are written as `type: [..., "null"]`, a per-side
+  set's `right` and its drop and rest-pause lists point to the fields listed
+  next to them, and `write_log_workout` no longer restates its set fields. Calls
+  are validated exactly as before; no tool, parameter or variable changed.
+- Dependency updates: zod 4.6.7 (memory exhaustion validating oversized
+  collections) and, for development, vitest 5.1.1.
+- README: setup for Claude Code and other MCP clients next to opencode, and a
+  summary of the rules leap enforces.
+
 ## 1.1.0 — 2026-10-09
 
 Works with openGym 1.4.0 or later (tested with 1.4.0). **Needs openGym 1.4.0**:
