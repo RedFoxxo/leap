@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { HttpCore } from '../src/http/core.js'
-import { extensionOf, prepareUpload, saveNew } from '../src/media/files.js'
+import { prepareUpload, saveNew } from '../src/media/files.js'
 import { FetchStub } from './helpers/fetch-stub.js'
 
 const dir = () => mkdtempSync(join(tmpdir(), 'leap-files-'))
@@ -53,12 +53,6 @@ describe('saveNew', () => {
   it('refuses a folder that does not exist', () => {
     const d = dir()
     expect(() => saveNew(join(d, 'nope', 'x.jpg'), 'a'.repeat(64), 'image/jpeg', new Uint8Array([1]))).toThrow(/does not exist/)
-  })
-
-  it('treats only real media types as known', () => {
-    expect(extensionOf('image/png')).toBe('png')
-    expect(extensionOf('constructor')).toBe('bin')
-    expect(extensionOf('toString')).toBe('bin')
   })
 })
 

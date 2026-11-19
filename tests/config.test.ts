@@ -46,6 +46,17 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, OPENGYM_URL: 'https://a:b@gym.example.com' })).toThrow(/credentials/)
     expect(() => loadConfig({ ...base, OPENGYM_URL: 'https://gym.example.com/?x=1' })).toThrow(/query string/)
   })
+
+  it('reads LEAP_TOOLSETS in canonical order and rejects unknown names', () => {
+    expect(loadConfig({ ...base, LEAP_TOOLSETS: ' Body, training ' }).toolsets).toEqual(['training', 'body'])
+    expect(loadConfig({ ...base, LEAP_TOOLSETS: '' }).toolsets).toBeUndefined()
+    expect(loadConfig(base)).not.toHaveProperty('toolsets')
+    expect(() => loadConfig({ ...base, LEAP_TOOLSETS: 'training,workouts' })).toThrow(/LEAP_TOOLSETS has unknown toolsets: workouts \(known: training, routines/)
+  })
+
+  it('rejects a LEAP_TOOLSETS that names no toolset instead of registering no tools', () => {
+    expect(() => loadConfig({ ...base, LEAP_TOOLSETS: ' , ' })).toThrow(/LEAP_TOOLSETS names no toolset/)
+  })
 })
 
 describe('loadPairConfig', () => {

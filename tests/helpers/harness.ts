@@ -21,6 +21,8 @@ export interface Harness {
   ctx: ToolContext
   call: (name: string, args?: Record<string, unknown>) => Promise<CallResult>
   listTools: () => Promise<{ name: string; description?: string; annotations?: Record<string, unknown> }[]>
+  /** The server's instructions from the MCP handshake. */
+  instructions: () => string | undefined
   close: () => Promise<void>
 }
 
@@ -64,6 +66,9 @@ export async function harness(
     },
     async listTools() {
       return (await client.listTools()).tools as { name: string; description?: string; annotations?: Record<string, unknown> }[]
+    },
+    instructions() {
+      return client.getInstructions()
     },
     async close() {
       await client.close()

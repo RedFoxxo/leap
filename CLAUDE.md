@@ -13,8 +13,8 @@ Goal: **full coverage.** Everything the API offers a signed-in profile is
 reachable: training data (read, create, update, delete), computed stats, media,
 the AI Coach, account settings and, for admin profiles, administration.
 
-Status: 1.0.0 released 2026-10-07 (openGym 1.3.9); 1.1.0 in progress for
-openGym 1.4.0. See "Status and remaining work" at the end.
+Status: 1.0.0 released 2026-10-07 (openGym 1.3.9); 1.1.0 released 2026-10-09
+(openGym 1.4.0). See "Status and remaining work" at the end.
 
 Supported openGym versions live in `OPENGYM` in `src/version.ts`; the README's
 compatibility table, the changelog, the test server image and the shipped
@@ -54,9 +54,10 @@ Versions are pinned exactly. Before every commit run `npm run typecheck`,
 |---|---|---|
 | `OPENGYM_URL` | yes | Instance root, e.g. `https://gym.example.com` (no `/api/...`). https only, except localhost |
 | `OPENGYM_TOKEN` | yes (not for `leap pair`) | Bearer token. **Redact it from every log line and tool output** |
+| `LEAP_TOOLSETS` | no | Tool groups to register, comma-separated (default all); an unknown name is a startup error |
 
-That is the complete list. Fail at startup with a clear message if a required
-variable is missing.
+That is the complete list. Fail at startup with one message listing every
+problem (a missing required variable, an unknown toolset).
 
 leap contacts no host but `OPENGYM_URL`. The exercise catalogue ships in
 `data/exercises.json`; if it cannot be read, tools show ids instead of
@@ -80,7 +81,8 @@ built-in names and say so.
 ```
 src/
   index.ts             bootstrap: `leap` (MCP on stdio) and `leap pair`
-  server.ts            tool registration; tier check and MCP annotations
+  server.ts            tool registration; tier check, MCP annotations (only readOnlyHint, on reads), server
+                       instructions, and the compact tools/list it serves
   config.ts            env loading + validation
   compat.ts            which openGym the server runs (told from /api/health), whether leap may write
   pair.ts              pairing-code redemption
@@ -121,7 +123,8 @@ src/
     backup.ts          pre-write backups
     ids.ts             entry ids in the app's format
   tools/
-    types.ts, context.ts, respond.ts, index.ts, schema.ts (shared input schemas), write.ts (shared write reporting)
+    types.ts (tiers, toolsets), context.ts, respond.ts, index.ts (every tool, and each toolset's), schema.ts (shared
+    input schemas, `sameAs`), write.ts (shared write reporting, the server instructions)
     account/           read_me, read_instance; profile.ts: read_profile, read_settings,
                        read_document (raw escape hatch: any top-level key); write.ts:
                        read_account, write_passkey_name, write_pairing_code, delete_all_sessions
@@ -222,6 +225,20 @@ Rules for mutate functions:
   Coach requests that spend provider budget are `write_`.
 - Responses are compact JSON. Errors: `isError: true`, a one-line summary, then
   `status`, `code` and `body`.
+- **Toolsets** (`LEAP_TOOLSETS`): every tool is in exactly one toolset, listed
+  in `TOOLSET_TOOLS` (`src/tools/index.ts`) and in the README's Toolsets
+  section (tests check both). A new tool goes into one; measure the toolsets'
+  tokens again (tools/list bytes / 4) and update the README table.
+- **Every listed byte costs context in every session.** The model reads the
+  tools/list `server.ts` builds: no `$schema`, no default annotations, nullable
+  primitives as `type: [..., "null"]`. No `$ref`/`$defs`: Claude Code and
+  opencode (with some providers) mishandle them (anthropics/claude-code#58794,
+  #81111; anomalyco/opencode#32829). Within one tool, a sub-schema listed in
+  full next to its twin may be listed in short with `sameAs` (validation is
+  unchanged); never point at another tool's schema, which the client may not
+  have loaded. What applies to many tools (how sync can undo a change or bring
+  back a deletion) goes in the server instructions (`INSTRUCTIONS`), not in
+  each description.
 
 ## Testing
 
@@ -251,9 +268,10 @@ and against openGym's own code), custom exercises, media (verified live).
 
 Local files: leap reads a file only for `write_attach_media` (a regular file
 whose bytes are one of the seven media types) and writes one only for
-`write_download_media` (a new file, mode 600, never overwriting, named with
-the extension of the media type, so it can never become a script, a key or a
-start-up file; a local write, so it is in the write tier). Photos lose their
+`write_download_media` (a new file, mode 600, never overwriting, only when its
+bytes are one of the seven media types and named with that type's extension, so
+it can never become a script, a key or a start-up file; the folder is checked
+before downloading; a local write, so it is in the write tier). Photos lose their
 metadata before upload; videos with a location are refused. Both decided with
 the user (2026-10-07).
 

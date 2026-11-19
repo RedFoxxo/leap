@@ -191,7 +191,7 @@ describe('write_exercise_note and write_favourite', () => {
 
   it('says how a note syncs, like every setting', async () => {
     const h = await harness()
-    expect((await h.listTools()).find((t) => t.name === 'write_exercise_note')!.description).toMatch(/one setting and one day at a time/)
+    expect(h.instructions()).toMatch(/exercise notes and the plan .*one setting and one day at a time/)
     await h.close()
   })
 

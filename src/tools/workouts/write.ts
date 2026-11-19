@@ -14,7 +14,7 @@ import { apply, refuse } from '../../state/store.js'
 import { isRecord, listOf, unitOf, writableList, type Entry, type State } from '../../state/types.js'
 import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
-import { entryId, exerciseId, isoDate, workoutId } from '../schema.js'
+import { entryId, exerciseId, isoDate, sameAs, workoutId } from '../schema.js'
 import { defineTool } from '../types.js'
 import { change, RESURRECTION_NOTE } from '../write.js'
 
@@ -35,10 +35,18 @@ const clusters = z
   .max(20)
   .optional()
   .describe('Rest-pause: how the total reps broke down')
-const other = z.record(z.string(), z.unknown()).optional().describe('Ignored (from read_workout); those fields are kept as they are')
+const other = z.record(z.string(), z.unknown()).optional().describe('From read_workout; ignored, the stored fields are kept')
 
 const side = z
-  .object({ weight: z.number().min(0).max(2000).optional(), reps: z.number().int().min(0).max(1000), done: z.boolean().optional(), ...effort, drops, clusters, other })
+  .object({
+    weight: z.number().min(0).max(2000).optional(),
+    reps: z.number().int().min(0).max(1000),
+    done: z.boolean().optional(),
+    ...effort,
+    drops: sameAs(drops, "As the set's drops"),
+    clusters: sameAs(clusters, "As the set's clusters"),
+    other,
+  })
   .strict()
 
 const setInput = z
@@ -54,7 +62,7 @@ const setInput = z
     drops,
     clusters,
     left: side.optional().describe('Per-side set: give left and right instead of weight/reps, each with its own rir/rpe, drops or clusters'),
-    right: side.optional(),
+    right: sameAs(side.optional(), 'Same fields as left'),
     failure: z.boolean().optional().describe('Taken to failure (the app shows an F; counts as RIR 0 unless rated). Not on warm-ups'),
     max: z.boolean().optional().describe("A pyramid's Max set (as many reps as possible)"),
     incline: z.number().min(0).max(40).multipleOf(0.5).optional().describe('Cardio: incline in percent (treadmill, stairs), 0–40 in steps of 0.5'),
@@ -71,15 +79,16 @@ const entryInput = z
     note: z.string().max(500).nullable().optional().describe('Left out: kept; null or empty: removed'),
     superset: z.string().min(1).max(64).nullable().optional().describe('Label (or the id read_workout shows) shared by adjacent exercises done as a superset; null removes it'),
     routineId: entryId.nullable().optional().describe('On a combined day: the routine this exercise came from (inferred when left out)'),
-    position: z.number().optional().describe('Ignored (from read_workout)'),
-    name: z.string().optional().describe('Ignored (from read_workout)'),
-    routineName: z.string().optional().describe('Ignored (from read_workout)'),
-    volume: z.number().optional().describe('Ignored (from read_workout)'),
-    bestWeight: z.number().optional().describe('Ignored (from read_workout)'),
-    weightMeans: z.string().optional().describe('Ignored (from read_workout)'),
+    position: z.number().optional(),
+    name: z.string().optional(),
+    routineName: z.string().optional(),
+    volume: z.number().optional(),
+    bestWeight: z.number().optional(),
+    weightMeans: z.string().optional(),
     other,
   })
   .strict()
+  .describe('position, name, routineName, volume, bestWeight and weightMeans (from read_workout) are ignored')
 
 type EntryInput = z.output<typeof entryInput>
 
@@ -320,9 +329,9 @@ const endsInFuture = (end: number, clock: number, zone: string | undefined) =>
 export const writeLogWorkout = defineTool({
   name: 'write_log_workout',
   description:
-    'Log a finished workout. Sets: weight + reps (done defaults to true), warmup, rir and/or rpe, failure (taken to failure), a drop set (drops), rest-pause (clusters; reps is the total), a pyramid\'s Max set (max), per side (left and right, each with its own weight, reps, rir/rpe and drops or clusters), timed (sec, optional weight; a hold per side is two rows, side L then R) or cardio (min, speed in km/h, optional incline in % with min). Weights in the profile unit; for a dumbbell exercise whose weight means per dumbbell or both together, the session is stamped with that meaning, as in the app, and volume counts both bells when it is per dumbbell. Every exercise needs at least one completed set. On a combined day (several routineIds) each exercise is linked to its routine, inferred when not given; sessions of a routine excluded from progression are marked so. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. When the plan follows the app\'s rotation, the output says which sessions of the round the workout did, and the workout that completes a round starts the next one the day after, as the app does. Without a start time, today ends now (starting no earlier than midnight) and other days start at 18:00. No future dates or times: the workout must have ended by now.',
+    "Log a finished workout. A set is weight + reps, timed (sec) or cardio (min, speed); its fields cover warm-ups, effort, failure, drop sets, rest-pause, a pyramid's Max set and per-side sets. Weights in the profile unit; for a dumbbell exercise whose weight means per dumbbell or both together, the session is stamped with that meaning, as in the app, and volume counts both bells when it is per dumbbell. Every exercise needs at least one completed set. On a combined day (several routineIds) each exercise is linked to its routine, inferred when not given; sessions of a routine excluded from progression are marked so. leap computes volume, best weights and PR badges as the app does; logging today also raises the remembered working weight. When the plan follows the app's rotation, the output says which sessions of the round the workout did, and the workout that completes a round starts the next one the day after, as the app does. Without a start time, today ends now (starting no earlier than midnight) and other days start at 18:00. No future dates or times: the workout must have ended by now.",
   input: {
-    date: isoDate.optional().describe('Default today'),
+    date: isoDate.optional().describe('YYYY-MM-DD, default today'),
     start: time.optional().describe("Start time HH:MM in the user's time zone (the profile's reminder zone, else this machine's)"),
     durationMin: z.number().int().min(1).max(600).optional().describe('Default 60'),
     routineIds: z.array(entryId).max(10).optional().describe('The routine(s) this session followed; several make a combined day'),
@@ -494,7 +503,7 @@ export const writeUpdateWorkout = defineTool({
 
 export const deleteWorkout = defineTool({
   name: 'delete_workout',
-  description: `Delete a logged workout (by the id read_workouts shows; for a workout from before ids, "YYYY-MM-DD|<start>"). A remembered working weight that came from it falls back to the best left in history; its photos and videos are deleted by openGym after a grace period. ${RESURRECTION_NOTE}`,
+  description: 'Delete a logged workout (by the id read_workouts shows; for a workout from before ids, "YYYY-MM-DD|<start>"). A remembered working weight that came from it falls back to the best left in history; its photos and videos are deleted by openGym after a grace period.',
   input: { id: workoutId },
   async handler(args, ctx) {
     const makeChecks = await checks(ctx)

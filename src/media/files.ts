@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync, unlinkSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { inspect, KIND_OF, type MediaInfo, type MediaMime } from './inspect.js'
+import { inspect, type MediaInfo, type MediaMime } from './inspect.js'
 import { stripMetadata } from './strip.js'
 
 /** openGym refuses anything over 200 MB in a reference; nothing larger is read. */
@@ -76,7 +76,31 @@ const EXT: Record<MediaMime, string> = {
   'video/webm': 'webm',
 }
 
-export const extensionOf = (mime: string) => (Object.hasOwn(KIND_OF, mime) ? EXT[mime as MediaMime] : 'bin')
+const HIDDEN = 'downloads are not saved in hidden folders or as hidden files'
+
+/**
+ * Where a download goes, checked before anything is downloaded: an existing
+ * folder, as given and with links resolved (a link to a hidden folder counts as
+ * one), and the file name when `target` is not a folder.
+ */
+export function downloadTarget(target: string): { folder: string; name?: string } {
+  const given = expandPath(target)
+  let isDir = false
+  try {
+    isDir = statSync(given).isDirectory()
+  } catch {
+    // not there yet: a file name
+  }
+  const folder = isDir ? given : dirname(given)
+  let real: string
+  try {
+    real = realpathSync(folder)
+  } catch {
+    throw new Error(`the folder ${folder} does not exist`)
+  }
+  if ([...folder.split(sep), ...real.split(sep)].some((part) => part.startsWith('.'))) throw new Error(HIDDEN)
+  return isDir ? { folder: real } : { folder: real, name: basename(given) }
+}
 
 /**
  * Writes a new file; an existing path is never overwritten. A directory gets
@@ -85,33 +109,14 @@ export const extensionOf = (mime: string) => (Object.hasOwn(KIND_OF, mime) ? EXT
  * and desktops load files from hidden folders such as ~/.bashrc.d or
  * ~/.config/autostart).
  */
-export function saveNew(target: string, hash: string, mime: string, bytes: Uint8Array): string {
-  const given = expandPath(target)
-  const ext = extensionOf(mime)
-  let isDir = false
-  try {
-    isDir = statSync(given).isDirectory()
-  } catch {
-    // not there yet: a file name
-  }
-  let name = `${hash}.${ext}`
-  if (!isDir) {
-    name = basename(given)
-    const allowed = ext === 'jpg' ? ['jpg', 'jpeg'] : [ext]
-    if (!allowed.some((e) => name.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
-  }
-  // The folder as it really is, so a link to a hidden folder counts as one.
-  const folder = isDir ? given : dirname(given)
-  let real: string
-  try {
-    real = realpathSync(folder)
-  } catch {
-    throw new Error(`the folder ${folder} does not exist`)
-  }
-  const path = join(real, name)
-  if (given.split(sep).some((part) => part.startsWith('.')) || path.split(sep).some((part) => part.startsWith('.'))) {
-    throw new Error('downloads are not saved in hidden folders or as hidden files')
-  }
+export function saveNew(target: string, hash: string, mime: MediaMime, bytes: Uint8Array): string {
+  const ext = EXT[mime]
+  const { folder, name: given } = downloadTarget(target)
+  const allowed = ext === 'jpg' ? ['jpg', 'jpeg'] : [ext]
+  if (given !== undefined && !allowed.some((e) => given.toLowerCase().endsWith(`.${e}`))) throw new Error(`the file name must end in .${ext} for this ${mime} file`)
+  const name = given ?? `${hash}.${ext}`
+  if (name.startsWith('.')) throw new Error(HIDDEN)
+  const path = join(folder, name)
   const fd = openSync(path, 'wx', 0o600)
   try {
     for (let done = 0; done < bytes.length; ) done += writeSync(fd, bytes, done, bytes.length - done)

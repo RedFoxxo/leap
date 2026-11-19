@@ -27,7 +27,7 @@ import { isRecord, listOf, writableMap, type State } from '../../state/types.js'
 import { invalid } from '../respond.js'
 import { entryId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
-import { change, LAST_CHANGE_NOTE } from '../write.js'
+import { change } from '../write.js'
 
 /**
  * The rotation (A → B → C …) and the session queue, written as the app's Plan
@@ -54,7 +54,7 @@ const PLANNER_NOTE =
 export const writeRotation = defineTool({
   name: 'write_rotation',
   description:
-    `Set the rotation: the routines trained in turn (A → B → C → A …), not tied to weekdays; the next session is the first one of the round not done yet, on whatever day is trained next. Switches the plan to rotation mode. Editing a running rotation keeps the round's progress (done is by routine since the round began), clears date pins of routines taken out, and starts the next round when the edit leaves the current one complete. When a round completes, logging its last workout starts the next round the day after. Weekday routines stay and count on top of the loop. ${PLANNER_NOTE} adopt: true takes such a queue over as the user's own rotation. ${LAST_CHANGE_NOTE}`,
+    `Set the rotation: the routines trained in turn (A → B → C → A …), not tied to weekdays; the next session is the first one of the round not done yet, on whatever day is trained next. Switches the plan to rotation mode. Editing a running rotation keeps the round's progress (done is by routine since the round began), clears date pins of routines taken out, and starts the next round when the edit leaves the current one complete. When a round completes, logging its last workout starts the next round the day after. Weekday routines stay and count on top of the loop. ${PLANNER_NOTE} adopt: true takes such a queue over as the user's own rotation.`,
   input: {
     routineIds: ROUTINES.describe('The routines in order, each once'),
     adopt: z.boolean().optional().describe("Take over a planner's queue that is running now (default false: refused)"),
@@ -94,7 +94,7 @@ export const writeRotation = defineTool({
 export const writeScheduleMode = defineTool({
   name: 'write_schedule_mode',
   description:
-    `How training is planned, as the app's "How you train" switch: "rotation" holds rotation mode and starts a round from the saved rotation when there is one (set the rotation with write_rotation); "week" goes back to fixed weekdays, which were never touched: the app's own round stops (its future date pins go) and the rotation stays saved for later. Choosing the mode the plan is already in changes nothing, so a running round keeps its progress. A planner's queue is not stopped by "week"; clear it with write_session_queue. ${LAST_CHANGE_NOTE}`,
+    `How training is planned, as the app's "How you train" switch: "rotation" holds rotation mode and starts a round from the saved rotation when there is one (set the rotation with write_rotation); "week" goes back to fixed weekdays, which were never touched: the app's own round stops (its future date pins go) and the rotation stays saved for later. Choosing the mode the plan is already in changes nothing, so a running round keeps its progress. A planner's queue is not stopped by "week"; clear it with write_session_queue.`,
   input: { mode: z.enum(['week', 'rotation']) },
   async handler(args, ctx) {
     return change(
@@ -129,7 +129,7 @@ export const writeScheduleMode = defineTool({
 export const writeRotationRound = defineTool({
   name: 'write_rotation_round',
   description:
-    `Control the round of the app's own rotation: "start" begins a round from the saved rotation when none is running; "restart" starts the loop over from its first routine today, and nothing logged before now counts for it; "stop" ends the round and keeps the rotation saved (rotation mode stays selected; write_schedule_mode "week" goes back to weekdays). The round's future date pins are cleared when it is replaced or stopped. ${LAST_CHANGE_NOTE}`,
+    `Control the round of the app's own rotation: "start" begins a round from the saved rotation when none is running; "restart" starts the loop over from its first routine today, and nothing logged before now counts for it; "stop" ends the round and keeps the rotation saved (rotation mode stays selected; write_schedule_mode "week" goes back to weekdays). The round's future date pins are cleared when it is replaced or stopped.`,
   input: { action: z.enum(['start', 'restart', 'stop']) },
   async handler(args, ctx) {
     return change(
@@ -162,7 +162,7 @@ export const writeRotationRound = defineTool({
 export const writeSessionQueue = defineTool({
   name: 'write_session_queue',
   description:
-    `Act as a planner: write the sessions of a coming week as a queue (the routines in order; the first one not done yet is the session of whatever day is trained next), or clear the queue with routineIds null. ${PLANNER_NOTE} It replaces whatever round is running, the app's own rotation included (the saved rotation stays). A session counts as done when a workout of its routine starts after the queue was written, or is dated from startsOn on and named after the routine (unless strict). Use write_rotation instead for the user's own rotation. ${LAST_CHANGE_NOTE}`,
+    `Act as a planner: write the sessions of a coming week as a queue (the routines in order; the first one not done yet is the session of whatever day is trained next), or clear the queue with routineIds null. ${PLANNER_NOTE} It replaces whatever round is running, the app's own rotation included (the saved rotation stays). A session counts as done when a workout of its routine starts after the queue was written, or is dated from startsOn on and named after the routine (unless strict). Use write_rotation instead for the user's own rotation.`,
   input: {
     routineIds: ROUTINES.nullable().describe('The sessions in order, each routine once; null clears the queue'),
     label: z.string().trim().max(60).optional().describe('Shown on Home, e.g. "Week 3"'),
@@ -198,7 +198,7 @@ export const writeSessionQueue = defineTool({
 export const writeDayNote = defineTool({
   name: 'write_day_note',
   description:
-    `Note why a day had no training (sick, travel, rest, injured, and/or a line of text), today or earlier; a day with a note is excused: the missed-workout nudge and the workout-day reminder leave it alone, and the app shows the note in its calendar. A field left out keeps what the note has; null removes it, and a note with no tag and no text is removed. The app offers a new note only on a day without a workout; leap allows it and says so. ${LAST_CHANGE_NOTE}`,
+    `Note why a day had no training (sick, travel, rest, injured, and/or a line of text), today or earlier; a day with a note is excused: the missed-workout nudge and the workout-day reminder leave it alone, and the app shows the note in its calendar. A field left out keeps what the note has; null removes it, and a note with no tag and no text is removed. The app offers a new note only on a day without a workout; leap allows it and says so.`,
   input: {
     date: isoDate,
     tag: z.enum(DAY_NOTE_TAGS).nullable().optional(),

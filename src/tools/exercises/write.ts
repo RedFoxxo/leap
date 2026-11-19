@@ -253,7 +253,7 @@ function cleanupSupersets(items: unknown[]): void {
 
 export const deleteCustomExercise = defineTool({
   name: 'delete_custom_exercise',
-  description: `Delete a custom exercise, as the app does: it is taken out of every routine, the favourites and the remembered weights; logged workouts keep their sets, with its name and muscles copied onto them so history still reads. ${RESURRECTION_NOTE}`,
+  description: 'Delete a custom exercise, as the app does: it is taken out of every routine, the favourites and the remembered weights; logged workouts keep their sets, with its name and muscles copied onto them so history still reads.',
   input: { id: entryId },
   async handler(args, ctx) {
     return change(

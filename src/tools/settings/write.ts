@@ -10,7 +10,7 @@ import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
 import { exerciseId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
-import { change, LAST_CHANGE_NOTE, RESURRECTION_NOTE } from '../write.js'
+import { change, RESURRECTION_NOTE } from '../write.js'
 
 const weight = z.number().positive().max(1000)
 const sameNumber = (a: unknown, b: number) => typeof a === 'number' && Math.abs(a - b) < 1e-9
@@ -58,7 +58,7 @@ export const writeBodyweight = defineTool({
 
 export const deleteBodyweight = defineTool({
   name: 'delete_bodyweight',
-  description: `Delete the weigh-in of a day. ${RESURRECTION_NOTE}`,
+  description: 'Delete the weigh-in of a day.',
   input: { date: isoDate },
   async handler(args, ctx) {
     return change(
@@ -78,7 +78,7 @@ export const deleteBodyweight = defineTool({
 
 export const writeGoalWeight = defineTool({
   name: 'write_goal_weight',
-  description: `Set the goal body weight (targetW) in the profile unit, or clear it with null. ${LAST_CHANGE_NOTE}`,
+  description: 'Set the goal body weight (targetW) in the profile unit, or clear it with null.',
   input: { weight: weight.nullable() },
   async handler(args, ctx) {
     return change(
@@ -168,7 +168,7 @@ const SETTINGS = {
 export const writeSettings = defineTool({
   name: 'write_settings',
   description:
-    `Change profile settings; only the ones given change. The weight unit is not changed here: switching it converts every stored weight, which the app does. ${LAST_CHANGE_NOTE}`,
+    'Change profile settings; only the ones given change. The weight unit is not changed here: switching it converts every stored weight, which the app does.',
   input: SETTINGS,
   async handler(args, ctx) {
     const given = Object.entries(args).filter(([, v]) => v !== undefined)
@@ -228,7 +228,7 @@ export const writeSettings = defineTool({
 
 export const writeExerciseNote = defineTool({
   name: 'write_exercise_note',
-  description: `Set the standing note of an exercise (shown every time it is done, e.g. "seat 4, pin 7"); an empty note removes it. At most 500 characters. ${LAST_CHANGE_NOTE}`,
+  description: 'Set the standing note of an exercise (shown every time it is done, e.g. "seat 4, pin 7"); an empty note removes it. At most 500 characters.',
   input: { exerciseId, note: z.string().max(500) },
   async handler(args, ctx) {
     const check = await exerciseCheck(ctx)
@@ -357,7 +357,7 @@ function stampRaw(key: string, previous: unknown, value: unknown, now: number): 
 export const writeDocument = defineTool({
   name: 'write_document',
   description:
-    `Escape hatch: set one top-level value of the profile document that no dedicated tool covers (equipment profiles, plate inventory, bar weights, a setting from a newer openGym version), or remove it with null. Lists and maps keep their type. Refused for training data, values with their own tool, the unit and openGym's own bookkeeping. Check the current value with read_document first. ${LAST_CHANGE_NOTE}`,
+    "Escape hatch: set one top-level value of the profile document that no dedicated tool covers (equipment profiles, plate inventory, bar weights, a setting from a newer openGym version), or remove it with null. Lists and maps keep their type. Refused for training data, values with their own tool, the unit and openGym's own bookkeeping. Check the current value with read_document first.",
   input: { key: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/), value: z.unknown() },
   async handler(args, ctx) {
     if (RAW_PROTECTED.has(args.key)) return invalid(`"${args.key}" has a dedicated tool or belongs to openGym; it cannot be set raw`)

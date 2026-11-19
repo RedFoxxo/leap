@@ -15,13 +15,14 @@ npm run build
 ```
 
 The server entry point is `build/index.js` (MCP over stdio). To run a local build
-instead of the published package, point your client at it, e.g. in opencode:
+instead of the published package, point your client at it, e.g. in opencode
+(the server entry under `mcp.servers`, as in the README):
 
-```json
+```jsonc
 "leap": {
   "type": "local",
   "command": ["node", "/path/to/leap/build/index.js"],
-  "environment": { "OPENGYM_URL": "{env:OPENGYM_URL}", "OPENGYM_TOKEN": "{env:OPENGYM_TOKEN}" }
+  "environment": { "OPENGYM_URL": "{env:OPENGYM_URL}", "OPENGYM_TOKEN": "{env:OPENGYM_TOKEN}" },
 }
 ```
 

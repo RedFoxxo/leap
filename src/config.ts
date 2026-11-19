@@ -1,8 +1,12 @@
+import { TOOLSETS, type Toolset } from './tools/types.js'
+
 export interface Config {
   /** Instance root without a trailing slash, e.g. `https://gym.example.com`. */
   baseUrl: string
   /** Bearer token from `leap pair`. Empty only for commands that do not need one. */
   token: string
+  /** Tool groups to expose; every group when unset. */
+  toolsets?: Toolset[]
 }
 
 export class ConfigError extends Error {
@@ -45,6 +49,22 @@ function baseUrlOf(env: NodeJS.ProcessEnv, problems: string[]): string {
   return ''
 }
 
+function toolsets(env: NodeJS.ProcessEnv, problems: string[]): Toolset[] | undefined {
+  const raw = env.LEAP_TOOLSETS?.trim()
+  if (!raw) return undefined
+  const names = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+  if (names.length === 0) {
+    problems.push(`LEAP_TOOLSETS names no toolset (known: ${TOOLSETS.join(', ')}); unset it to register them all`)
+    return undefined
+  }
+  const unknown = names.filter((n) => !TOOLSETS.some((t) => t === n))
+  if (unknown.length > 0) {
+    problems.push(`LEAP_TOOLSETS has unknown toolsets: ${unknown.join(', ')} (known: ${TOOLSETS.join(', ')})`)
+    return undefined
+  }
+  return TOOLSETS.filter((t) => names.includes(t))
+}
+
 function fail(problems: string[]): never {
   throw new ConfigError(`Invalid leap configuration:\n- ${problems.join('\n- ')}`)
 }
@@ -55,8 +75,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const baseUrl = baseUrlOf(env, problems)
   const token = env.OPENGYM_TOKEN?.trim() ?? ''
   if (!token) problems.push('OPENGYM_TOKEN is required: run `npx -y @redfoxxo/leap pair` to get one')
+  const sets = toolsets(env, problems)
   if (problems.length > 0) fail(problems)
-  return { baseUrl, token }
+  return sets === undefined ? { baseUrl, token } : { baseUrl, token, toolsets: sets }
 }
 
 /** For `leap pair`, which needs the instance but has no token yet. */

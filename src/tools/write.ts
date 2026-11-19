@@ -34,14 +34,18 @@ export async function change<R>(
   return written(r.data, show(r.data.result))
 }
 
-/**
- * When a settings or plan change can still be undone, said by the tools that write them: openGym
- * (1.3.10 and later) merges settings, plan days and notes one at a time, by their stamps (see
- * docs/OPENGYM.md, "Sync between devices").
- */
-export const LAST_CHANGE_NOTE =
-  'openGym merges settings and the plan one setting and one day at a time: only a device that changes the same setting or day later, before it syncs, keeps its own value.'
-
-/** When a deleted entry can still come back, said by every delete tool. */
+/** When a deleted entry can still come back, said by every delete tool that records one (in its answer). */
 export const RESURRECTION_NOTE =
-  'openGym records the deletion, so every updated device drops the entry too; it comes back only from a device still on openGym 1.3.9 with unsynced changes, or from a device that edits the entry after the deletion before it syncs.'
+  'openGym records the deletion; the entry comes back only from a device still on openGym 1.3.9 with unsynced changes, or one that edits it after the deletion, before it syncs.'
+
+/**
+ * leap's server instructions, sent once per session instead of in every tool description: when a
+ * change can still be undone by another device. openGym (1.3.10 and later) merges settings, plan
+ * days and notes one at a time, by their stamps (see docs/OPENGYM.md, "Sync between devices").
+ */
+export const INSTRUCTIONS = [
+  "leap changes an openGym profile that the openGym app on the user's devices syncs too.",
+  'Settings (write_settings, write_goal_weight, write_document), exercise notes and the plan (weekdays, dates, rotation, schedule mode, round, queue, day notes):' +
+    ' openGym syncs one setting and one day at a time: a device that changes the same one later, before it syncs, keeps its value.',
+  `Deleted workouts, routines, custom exercises, weigh-ins and measurements: ${RESURRECTION_NOTE}`,
+].join('\n')

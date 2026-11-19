@@ -6,6 +6,14 @@ export type Tier = 'read' | 'write' | 'delete' | 'admin'
 
 export const TIERS: readonly Tier[] = ['read', 'write', 'delete', 'admin']
 
+/**
+ * Groups of tools a server exposes (`LEAP_TOOLSETS`), by what they cover; the
+ * tools of each are listed in `src/tools/index.ts`.
+ */
+export type Toolset = 'training' | 'routines' | 'body' | 'stats' | 'exercises' | 'settings' | 'media' | 'coach' | 'account' | 'admin'
+
+export const TOOLSETS: readonly Toolset[] = ['training', 'routines', 'body', 'stats', 'exercises', 'settings', 'media', 'coach', 'account', 'admin']
+
 export type ToolOutput = CallToolResult
 
 export interface ToolDef<S extends z.ZodRawShape = z.ZodRawShape> {

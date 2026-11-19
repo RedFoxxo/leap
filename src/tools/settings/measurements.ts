@@ -127,9 +127,7 @@ const value = z.number().positive().max(1000).nullable()
 export const writeMeasurement = defineTool({
   name: 'write_measurement',
   description:
-    'Log body measurements for a day (default today; one check-in per day, so values given here join or replace that day\'s, and null removes one). Lengths in `unit` (default the one the app shows: cm, or in for a lb profile), stored in cm as the app does; bodyFat in %. `custom` takes the profile\'s own kinds by name, and a new name creates that kind. Kinds: ' +
-    MEASUREMENT_KINDS.join(', ') +
-    '.',
+    'Log body measurements for a day (default today; one check-in per day, so values given here join or replace that day\'s, and null removes one). Lengths in `unit` (default the one the app shows: cm, or in for a lb profile), stored in cm as the app does; bodyFat in %. `custom` takes the profile\'s own kinds by name, and a new name creates that kind.',
   input: {
     date: isoDate.optional(),
     values: z.object(Object.fromEntries(MEASUREMENT_KINDS.map((k) => [k, value.optional()])) as Record<Kind, z.ZodOptional<typeof value>>).strict().optional(),
@@ -215,7 +213,7 @@ export const writeMeasurement = defineTool({
 
 export const deleteMeasurement = defineTool({
   name: 'delete_measurement',
-  description: `Delete the body measurements of a day. ${RESURRECTION_NOTE}`,
+  description: 'Delete the body measurements of a day.',
   input: { date: isoDate },
   async handler(args, ctx) {
     return change(

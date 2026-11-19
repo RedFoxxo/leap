@@ -13,7 +13,7 @@ import type { ToolContext } from '../context.js'
 import { invalid } from '../respond.js'
 import { entryId, exerciseId, isoDate } from '../schema.js'
 import { defineTool } from '../types.js'
-import { change, LAST_CHANGE_NOTE, RESURRECTION_NOTE } from '../write.js'
+import { change, RESURRECTION_NOTE } from '../write.js'
 
 const nullable = <T extends z.ZodTypeAny>(t: T) => t.nullable().optional()
 const intensifier = z.discriminatedUnion('type', [
@@ -58,11 +58,12 @@ const item = z
     dumbbellLoad: nullable(z.enum(['as', 'each', 'total'])).describe("Dumbbell and kettlebell exercises: what the weight means here, per dumbbell (each), both together (total) or as entered (as); default the exercise's own choice"),
     supersetName: nullable(z.string().max(40)).describe("The superset's name (on every exercise of the superset)"),
     supersetRestSec: nullable(z.number().int().min(0).max(900)).describe('Rest after each round of the superset, seconds (0 or null: the longest rest of its exercises)'),
-    position: z.number().optional().describe('Ignored (from read_routine)'),
-    name: z.string().optional().describe('Ignored (from read_routine)'),
+    position: z.number().optional(),
+    name: z.string().optional(),
     other: z.record(z.string(), z.unknown()).optional().describe('Ignored (from read_routine); those fields are kept as they are'),
   })
   .strict()
+  .describe('position and name (from read_routine) are ignored')
 
 type Item = z.output<typeof item>
 
@@ -427,7 +428,7 @@ function copyName(name: string, routines: unknown[]): string {
 
 export const deleteRoutine = defineTool({
   name: 'delete_routine',
-  description: `Delete a routine, as the app does: it is also taken off every weekday and every date it was planned on. Logged workouts keep their history. Like the app, it stays listed in the rotation and the running round, where it is skipped; deleting the last routine of a round leaves the round unusable (the app then offers to discard it). ${RESURRECTION_NOTE}`,
+  description: `Delete a routine, as the app does: it is also taken off every weekday and every date it was planned on. Logged workouts keep their history. Like the app, it stays listed in the rotation and the running round, where it is skipped; deleting the last routine of a round leaves the round unusable (the app then offers to discard it).`,
   input: { id: entryId },
   async handler(args, ctx) {
     return change(
@@ -487,7 +488,7 @@ const weekdayKey = z
 export const writeWeekPlan = defineTool({
   name: 'write_week_plan',
   description:
-    `Set the routines planned on weekdays, e.g. { "Monday": [pushId], "Friday": [pushId, legsId] }. Several routines on one day make a combined session; an empty list makes the day a rest day. Weekdays not given are left as they are. Date overrides (write_day_plan) still win on their dates. In rotation mode the weekdays stay in force on top of the loop (routines that are in the loop are not repeated on the loop's day), and going back to the fixed week uses them as they are. ${LAST_CHANGE_NOTE}`,
+    `Set the routines planned on weekdays, e.g. { "Monday": [pushId], "Friday": [pushId, legsId] }. Several routines on one day make a combined session; an empty list makes the day a rest day. Weekdays not given are left as they are. Date overrides (write_day_plan) still win on their dates. In rotation mode the weekdays stay in force on top of the loop (routines that are in the loop are not repeated on the loop's day), and going back to the fixed week uses them as they are.`,
   input: { days: z.record(weekdayKey, z.array(entryId).max(5)) },
   async handler(args, ctx) {
     const entries = Object.entries(args.days)
@@ -519,7 +520,7 @@ export const writeWeekPlan = defineTool({
 export const writeDayPlan = defineTool({
   name: 'write_day_plan',
   description:
-    `Override the plan for one date: a routine id, "rest", or null to go back to the weekly plan. A date takes one routine (combined days come from the weekly plan). While a rotation round runs: a routine of the round pins that session to the date (it is that day's session and is skipped on other days; once done, the pin is fulfilled), another routine replaces the round's session that day, and "rest" pauses the round that day. ${LAST_CHANGE_NOTE}`,
+    `Override the plan for one date: a routine id, "rest", or null to go back to the weekly plan. A date takes one routine (combined days come from the weekly plan). While a rotation round runs: a routine of the round pins that session to the date (it is that day's session and is skipped on other days; once done, the pin is fulfilled), another routine replaces the round's session that day, and "rest" pauses the round that day.`,
   input: { date: isoDate, plan: z.union([entryId, z.null()]).describe('Routine id, "rest", or null') },
   async handler(args, ctx) {
     return change(
