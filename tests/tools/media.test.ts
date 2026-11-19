@@ -8,7 +8,7 @@ import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { StubReply, type StubCall } from '../helpers/fetch-stub.js'
 import { harness } from '../helpers/harness.js'
 
-const NOW = new Date('2026-10-07T08:00:00').getTime()
+const NOW = new Date('2026-10-07T08:00:00+02:00').getTime()
 const MEDIA = { imageMB: 2, gifMB: 8, videoMB: 40, videoSec: 60, quotaMB: 200, workouts: true }
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const fixture = (name: string) => new URL(`../fixtures/media/${name}`, import.meta.url).pathname

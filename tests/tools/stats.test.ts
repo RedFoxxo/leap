@@ -112,7 +112,7 @@ describe('read_training_summary', () => {
   })
 
   it('defaults to the last 12 weeks', async () => {
-    vi.useFakeTimers({ now: new Date('2026-10-07T12:00:00'), toFake: ['Date'] })
+    vi.useFakeTimers({ now: new Date('2026-10-07T12:00:00+02:00'), toFake: ['Date'] })
     const h = await setup()
     const r = await h.call('read_training_summary')
     expect(r.json).toMatchObject({ from: '2026-07-16', to: '2026-10-07' })
@@ -121,7 +121,7 @@ describe('read_training_summary', () => {
   })
 
   it('takes today from the server’s clock', async () => {
-    const h = await setup(profile(), new Date('2026-10-07T12:00:00').getTime())
+    const h = await setup(profile(), new Date('2026-10-07T12:00:00+02:00').getTime())
     expect((await h.call('read_training_summary')).json).toMatchObject({ from: '2026-07-16', to: '2026-10-07' })
     expect((await h.call('read_muscle_balance')).json).toMatchObject({ from: '2026-10-01', to: '2026-10-07' })
     await h.close()

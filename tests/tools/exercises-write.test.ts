@@ -4,7 +4,7 @@ import { profile, PUSH } from '../fixtures/profile.js'
 import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { harness } from '../helpers/harness.js'
 
-const NOW = new Date('2026-10-07T08:00:00').getTime()
+const NOW = new Date('2026-10-07T08:00:00+02:00').getTime()
 
 async function setup(state: Record<string, unknown> = profile()) {
   const fake = new FakeOpenGym(state, 50)

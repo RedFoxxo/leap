@@ -112,7 +112,7 @@ describe('read_routines and read_routine', () => {
   })
 
   it('shows a routine with exercise names and every stored plan field', async () => {
-    vi.useFakeTimers({ now: new Date('2026-10-07T10:00:00'), toFake: ['Date'] })
+    vi.useFakeTimers({ now: new Date('2026-10-07T10:00:00+02:00'), toFake: ['Date'] })
     const { h } = await setup()
     const r = await h.call('read_routine', { id: PULL })
     expect(r.json).toMatchObject({ id: PULL, name: 'Pull Day', plannedDates: ['2026-10-11'], unit: 'kg' })

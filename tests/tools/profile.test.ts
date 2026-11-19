@@ -13,7 +13,7 @@ afterEach(() => vi.useRealTimers())
 
 describe('read_profile', () => {
   it('summarises the profile, today and the next training day', async () => {
-    vi.useFakeTimers({ now: new Date('2026-10-07T09:00:00'), toFake: ['Date'] })
+    vi.useFakeTimers({ now: new Date('2026-10-07T09:00:00+02:00'), toFake: ['Date'] })
     const { h } = await setup()
     const r = await h.call('read_profile')
     expect(r.json).toEqual({

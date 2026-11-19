@@ -3,7 +3,8 @@
  * tests. Covers every set kind, a combined day, a date override, a legacy
  * single-id weekday and unknown keys that must survive writes.
  */
-export const T0 = new Date('2026-10-05T18:00:00').getTime()
+/** Wall times in tests are the profile's (reminder.tz Europe/Warsaw, CEST in these weeks), never the machine's. */
+export const T0 = new Date('2026-10-05T18:00:00+02:00').getTime()
 const min = 60_000
 
 export const PUSH = 'r-push'
@@ -40,8 +41,8 @@ export function profile(): Record<string, unknown> {
       {
         id: 'w-legs',
         d: '2026-09-30',
-        start: new Date('2026-09-30T17:00:00').getTime(),
-        end: new Date('2026-09-30T18:05:00').getTime(),
+        start: new Date('2026-09-30T17:00:00+02:00').getTime(),
+        end: new Date('2026-09-30T18:05:00+02:00').getTime(),
         routineIds: [LEGS],
         routineId: LEGS,
         name: 'Leg Day',
@@ -112,7 +113,7 @@ export function profile(): Record<string, unknown> {
  * a drop of 0 reps, a 0-second hold, 0 cardio minutes, both rir and rpe).
  */
 export function appValuesWorkout(): Record<string, unknown> {
-  const start = new Date('2026-10-06T07:00:00').getTime()
+  const start = new Date('2026-10-06T07:00:00+02:00').getTime()
   return {
     id: 'w-app',
     d: '2026-10-06',

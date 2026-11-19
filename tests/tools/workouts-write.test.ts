@@ -4,7 +4,7 @@ import { appValuesWorkout, LEGS, profile, PUSH } from '../fixtures/profile.js'
 import { FakeOpenGym } from '../helpers/fake-opengym.js'
 import { harness } from '../helpers/harness.js'
 
-const NOW = new Date('2026-10-07T08:00:00').getTime()
+const NOW = new Date('2026-10-07T08:00:00+02:00').getTime()
 
 beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }))
 afterEach(() => vi.useRealTimers())
@@ -187,7 +187,7 @@ describe('write_log_workout', () => {
     expect(r.json.logged).toMatchObject({ name: 'Freestyle', prs: ['barbell full squat'] })
     expect(doc().workouts.map((w: { d: string }) => w.d)).toEqual(['2026-09-29', '2026-09-30', '2026-10-05'])
     const logged = doc().workouts[0]
-    expect(logged).toMatchObject({ start: new Date('2026-09-29T17:30:00').getTime(), end: new Date('2026-09-29T18:15:00').getTime(), routineIds: [], routineId: null })
+    expect(logged).toMatchObject({ start: new Date('2026-09-29T17:30:00+02:00').getTime(), end: new Date('2026-09-29T18:15:00+02:00').getTime(), routineIds: [], routineId: null })
     expect(logged).not.toHaveProperty('bw')
     expect(workout('w-legs').prs).toEqual([])
     expect(workout('w-push').prs).toEqual(['0025'])
@@ -270,8 +270,8 @@ describe('write_update_workout', () => {
     expect(workout('w-push')).toMatchObject({
       d: '2026-09-29',
       name: 'Moved',
-      start: new Date('2026-09-29T18:00:00').getTime(),
-      end: new Date('2026-09-29T19:10:00').getTime(),
+      start: new Date('2026-09-29T18:00:00+02:00').getTime(),
+      end: new Date('2026-09-29T19:10:00+02:00').getTime(),
     })
     await h.close()
   })
@@ -510,12 +510,12 @@ describe('the clock', () => {
   })
 
   it('starts a workout logged just after midnight on that day', async () => {
-    const now = new Date('2026-10-07T00:20:00').getTime()
+    const now = new Date('2026-10-07T00:20:00+02:00').getTime()
     vi.setSystemTime(now)
     const { h, doc } = await setup(profile(), now)
     const r = await h.call('write_log_workout', { entries: [{ exerciseId: '0043', sets: [{ weight: 100, reps: 5 }] }] })
     expect(r.isError, r.text).toBe(false)
-    expect(doc().workouts.at(-1)).toMatchObject({ d: '2026-10-07', start: new Date('2026-10-07T00:00:00').getTime(), end: now })
+    expect(doc().workouts.at(-1)).toMatchObject({ d: '2026-10-07', start: new Date('2026-10-07T00:00:00+02:00').getTime(), end: now })
     await h.close()
   })
 })
@@ -527,7 +527,7 @@ describe('moving a workout', () => {
     const { h, workout } = await setup(state)
     await h.call('write_update_workout', { id: 'w-push', date: '2026-10-01' })
     const w = workout('w-push')
-    expect(w.start).toBe(new Date('2026-10-01T18:00:00').getTime())
+    expect(w.start).toBe(new Date('2026-10-01T18:00:00+02:00').getTime())
     expect(w.end).toBe(w.start)
     await h.close()
   })
